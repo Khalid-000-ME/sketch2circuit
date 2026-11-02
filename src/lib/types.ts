@@ -121,7 +121,7 @@ export interface AnalyzeResponse extends CircuitGraph {
   timings?: Record<string, number>;
 }
 
-export interface SimulateResponse {
+export interface SimulateResponse extends CircuitGraph {
   simulation: Simulation;
   findings: Finding[];
   warnings: string[];

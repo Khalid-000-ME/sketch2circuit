@@ -4,7 +4,7 @@ import { canonicalise } from '../src/lib/circuit/graph';
 import { solveDC } from '../src/lib/circuit/solve';
 import { runRules } from '../src/lib/circuit/rules';
 
-let fails = 0;
+const fails = 0;
 for (const [name, fixture] of Object.entries(ALL_FIXTURES)) {
   const canon = canonicalise(fixture);
   const sim = solveDC(canon);

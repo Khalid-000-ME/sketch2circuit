@@ -10,8 +10,6 @@ import { NextResponse } from 'next/server';
 import { analyseGraph } from '@/lib/pipeline/analyse';
 import { HttpError, type CircuitGraph, type SimulateResponse } from '@/lib/types';
 
-export const runtime = 'nodejs';
-
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => null)) as CircuitGraph | null;
@@ -20,6 +18,10 @@ export async function POST(req: Request) {
     }
     const analysis = analyseGraph({ components: body.components, nets: body.nets ?? [] });
     const res: SimulateResponse = {
+      // The canonical graph goes back too: changing a component's type changes its
+      // pin names, and the client needs the renamed connections to stay in step.
+      components: analysis.components,
+      nets: analysis.nets,
       simulation: analysis.simulation,
       findings: analysis.findings,
       warnings: analysis.warnings,

@@ -1,26 +1,89 @@
 @import "tailwindcss";
 
+/*
+  A dark, instrument-panel palette. The 3D view is the brightest thing on screen
+  and everything else recedes behind it, so the board reads as the subject rather
+  than as one widget among several.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #07090d;
+  --bg-raised: #0d1118;
+  --bg-panel: #11161f;
+  --border: #1e2630;
+  --border-strong: #2b3542;
+  --text: #e8edf4;
+  --text-dim: #93a0b1;
+  --text-faint: #64717f;
+  --accent: #6ee7ff;
+  --error: #ff5d5d;
+  --warn: #ffb020;
+  --ok: #46d6a0;
+  --info: #7aa2ff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-raised: var(--bg-raised);
+  --color-panel: var(--bg-panel);
+  --color-edge: var(--border);
+  --color-edge-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-dim: var(--text-dim);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-error: var(--error);
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --color-info: var(--info);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+html, body { height: 100%; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A quiet grid behind the whole app, so empty space still reads as a workspace. */
+.workspace-grid {
+  background-image:
+    linear-gradient(to right, rgba(110, 231, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(110, 231, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+}
+
+/* Scrollbars that do not shout. */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.sweep::after {
+  content: ""; position: absolute; inset: 0; width: 33%;
+  background: linear-gradient(90deg, transparent, rgba(110, 231, 255, 0.5), transparent);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fade-up 260ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sweep::after, .fade-up { animation: none !important; }
+  * { scroll-behavior: auto !important; }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }

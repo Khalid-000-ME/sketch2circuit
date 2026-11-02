@@ -24,7 +24,7 @@ import sharp from 'sharp';
 import type { CircuitComponent, CircuitGraph, Confidence, Net } from '../types';
 import { HttpError, PINS } from '../types';
 import { normaliseType } from '../circuit/graph';
-import { readComponentCrop, readSketch, type SparkReading } from '../meta/spark';
+import { readComponentCrop, readSketch } from '../meta/spark';
 import { segmentConcepts, type SamMask } from '../meta/sam';
 import { markGround, traceNets, type TraceResult } from './trace';
 

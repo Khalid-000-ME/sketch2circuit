@@ -13,7 +13,7 @@ import { hasApiKey } from '@/lib/meta/client';
 import { HttpError, type AnalyzeResponse } from '@/lib/types';
 import { SAMPLES, prebakedFor } from '@/fixtures/samples';
 
-export const runtime = 'nodejs';
+// Node runtime is the default; sharp and the Model API calls both need it.
 export const maxDuration = 120;
 
 const MAX_BYTES = 10 * 1024 * 1024;
