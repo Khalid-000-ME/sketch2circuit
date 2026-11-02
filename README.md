@@ -90,8 +90,89 @@ Pins in the same region are the same electrical node. Nothing is probabilistic,
 so the same sketch always yields the same netlist — and when a pin touches
 nothing, the app says so rather than inventing a wire.
 
-If the trace covers fewer than 75% of leads, the app falls back to the model's
-own netlist **and says so**, in the confidence panel and in a warning.
+### Where the trace is silent, the model fills in — it does not take over
+
+The trace keeps authority over structure; the model is consulted only about pins
+the trace could not place. A pin the walk missed joins the traced net sharing the
+most pins with the model's net for it; only if no traced net overlaps does the
+model contribute a net of its own. Every net records its source, confidence
+tracks the share of leads actually *measured* rather than inferred, and the
+warnings name the specific pins that were inferred.
+
+The earlier all-or-nothing version threw the whole trace away when coverage was
+imperfect, which lost verified connections in order to repair unverified ones.
+Only below 40% coverage — too little structure to build on — does the model's
+netlist get used wholesale.
+
+---
+
+## Measured results
+
+Against the three bundled sketches, through the live API, scored by
+`scripts/live-samples.ts` with the hand-built fixtures as ground truth:
+
+| Metric | PRD target | Measured |
+|---|---|---|
+| Component type accuracy | ≥90% | **100%** (11/11) |
+| Exact netlist match after canonicalisation | ≥6 of 7 clean | **3 of 3** |
+| Handwritten values read correctly | ≥80% | **6 of 7** (one LED colour left null) |
+| Wire-trace lead coverage | — | 100%, 100%, 50% |
+| Edit re-simulation | <2s | **21ms** |
+| Analysis latency | p95 <15s | **14–37s — misses the target** |
+
+Every finding the rule suite produced on these sketches was correct, and the
+circuit that should be flagged was flagged.
+
+### What the live API actually taught us
+
+These are measurements, not guesses, and several contradicted the plan:
+
+- **SAM cannot find a battery by noun phrase.** Six phrasings — "battery
+  symbol", "battery", "parallel lines battery symbol", "drawn battery cell
+  symbol", "pair of long and short parallel lines", "circuit diagram battery" —
+  all returned zero masks for a battery drawn as four thin parallel lines, while
+  the same page returned clean masks for the resistor, the LED and the wires.
+  This is why components are segmented by **box prompt** rather than by phrase.
+- **SAM returns a resistor's zigzag when asked for "drawn wire line"**, which is
+  correct — that is what a resistor is drawn as — and ruinous if left in the wire
+  grid, because the zigzag becomes a region that captures the resistor's own pin.
+  Hence punching each symbol's own mask out of the wire grid.
+- **A tight box prompt yields a tight mask.** Prompted with an estimate that
+  clipped the zigzag, SAM returned the clipped zigzag; prompted with the same box
+  padded, it returned the whole symbol. Prompt boxes are padded 22%.
+- **Wire recall depends sharply on wording.** "drawn wire line" finds one sample's
+  lower run and misses its upper one; the bare "line" finds the upper one.
+  Phrasings are unioned, with a filter for the ruled lines and margin rule that
+  "line" also returns.
+- **SAM is deterministic; Muse Spark is not.** Five identical SAM requests
+  returned byte-identical masks, with and without `temperature: 0`. Spark's
+  bounding boxes vary by a few percent run to run *even at `temperature: 0`*,
+  and since those boxes drive the prompts and the pin anchors, trace coverage
+  moves between runs. Reconciliation is what makes the final netlist stable
+  anyway.
+- **`reasoning_effort: "high"` is required for the page read.** At `"medium"` the
+  same sketches came back with duplicated components, no values at all and
+  unusable connectivity — and not faster, since a confused read reasons longer.
+
+### Latency
+
+The page read is essentially the whole cost:
+
+```
+spark page read   22.3s   ← reasoning_effort: high, and it has to be
+sam wire masks     3.0s   ← runs in parallel with the page read
+sam box prompts    2.9s
+crop re-reads      2.8s   ← only for values the page read was unsure of
+wire trace         0.01s
+solve + rules      <0.01s
+```
+
+Two things were done about it: the wire segmentation needs nothing from the page
+read, so it is started first and overlaps it; and the crop pass now runs only for
+components whose value came back empty, whose identification was hesitant, or
+whose polarity matters and was not reported. Together those took the simplest
+sketch from 25s to 14s. The rest is Spark's reasoning time and is not ours to
+optimise.
 
 ---
 
@@ -286,4 +367,14 @@ npx tsc --noEmit
 - **The bundled sample sketches are generated, not photographed.** They are drawn
   with jittered strokes on ruled paper so the perception stage faces roughly the
   same question a phone photo asks, but they are not a substitute for testing on
-  real photographs.
+  real photographs. Three sketches is also a thin corpus: the PRD asks for ten,
+  across three difficulty bands, and that has not been built.
+- **Analysis takes 14–37 seconds, against a 15s target.** Spark's page read is
+  ~22s of it and needs `reasoning_effort: "high"` to be correct at all.
+- **Wire-trace coverage varies between runs on the same sketch**, because Spark's
+  boxes are not reproducible. The reconciliation step means the netlist comes out
+  right either way, but the proportion of connections that are *measured* rather
+  than *inferred* is not stable, and the confidence figure moves with it.
+- **One bundled sketch has a wire SAM will not segment under any phrasing tried**
+  — a long thin horizontal stroke near the top of a ruled page. Its two verticals
+  are found, the connection between them is inferred, and the app says so.

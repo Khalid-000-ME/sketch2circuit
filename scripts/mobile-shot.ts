@@ -8,7 +8,8 @@ async function main() {
     await page.goto('http://localhost:3111', { waitUntil: 'networkidle' });
     await page.screenshot({ path: `/tmp/sketchit-shots/m-${name}-capture.png`, fullPage: true });
     await page.getByRole('button', { name: /burns out/i }).click();
-    await page.waitForSelector('canvas');
+    // Live analysis takes about half a minute, so this waits well past it.
+  await page.waitForSelector('canvas', { timeout: 180_000 });
     await page.waitForTimeout(3000);
     await page.screenshot({ path: `/tmp/sketchit-shots/m-${name}-result.png` });
     const overflow = await page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1");

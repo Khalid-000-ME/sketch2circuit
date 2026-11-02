@@ -57,13 +57,15 @@ export const PARALLEL_SWITCH: CircuitGraph = {
     c('R1', 'resistor', '470', 'ohm'),
     c('R2', 'resistor', '1k', 'ohm'),
     c('D1', 'led', 'green'),
-    c('C1', 'capacitor_electrolytic', '10u', 'F'),
+    // Two straight plates in the sketch, so this is a ceramic part, not an
+    // electrolytic — the drawing is the authority here, not the round number.
+    c('C1', 'capacitor', '10u', 'F'),
   ],
   nets: [
     n('N1', ['B1.pos', 'SW1.a']),
-    n('N2', ['SW1.b', 'R1.a', 'R2.a', 'C1.pos']),
+    n('N2', ['SW1.b', 'R1.a', 'R2.a', 'C1.a']),
     n('N3', ['R1.b', 'D1.anode']),
-    n('N4', ['D1.cathode', 'R2.b', 'C1.neg', 'B1.neg'], true),
+    n('N4', ['D1.cathode', 'R2.b', 'C1.b', 'B1.neg'], true),
   ],
 };
 

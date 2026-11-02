@@ -160,6 +160,9 @@ export async function readSketch(imageDataUrl: string, opts: MetaRequestOptions 
       imagePart(imageDataUrl),
     ],
     SKETCH_SCHEMA as unknown as { name: string; schema: Json },
+    // Measured: 'high' is required here. At 'medium' the same sketches come back
+    // with duplicated components, no values at all and unusable connectivity —
+    // and not reliably faster, since a confused read reasons for longer.
     { effort: 'high', ...opts },
   );
   if (!raw) return null;
@@ -230,7 +233,7 @@ export async function readComponentCrop(
       imagePart(cropDataUrl),
     ],
     CROP_SCHEMA as unknown as { name: string; schema: Json },
-    { effort: 'low', ...opts },
+    { effort: 'minimal', ...opts },
   );
   if (!raw) return null;
   return {

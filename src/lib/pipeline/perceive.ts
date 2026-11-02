@@ -5,19 +5,26 @@
  * one:
  *
  *   1. Spark reads the page once and says what is there, roughly where, and which
- *      noun phrases are worth segmenting. A segmentation model cannot do this —
- *      it needs to be told what to look for.
- *   2. SAM segments each of those concepts, returning a tight box and a mask per
- *      match. A language model cannot do this — it does not produce pixels.
- *   3. SAM's boxes replace Spark's estimates, because a mask boundary is exact and
- *      a described box is not. Pin geometry is computed from them.
- *   4. SAM's wire mask is walked deterministically to recover connectivity
- *      (`trace.ts`). This is the stage that decides whether the product works.
- *   5. Each component is cropped from its own mask and sent back to Spark alone,
- *      so a handwritten "220" is read from a frame it fills rather than from a
- *      corner of a photograph.
+ *      noun phrases describe the drawn wires. A segmentation model cannot do
+ *      this — it has to be told what to look for, and it cannot read "220".
+ *   2. SAM refines Spark's approximate boxes into exact masks, one request for
+ *      the whole page, each answering under the id we supplied. A language model
+ *      cannot do this — it does not produce pixels.
+ *   3. SAM segments the drawn wire lines by noun phrase, and that mask is walked
+ *      deterministically to recover connectivity (`trace.ts`). This is the stage
+ *      that decides whether the product works at all.
+ *   4. Each component is cropped from its own refined box and sent back to Spark
+ *      alone, so a handwritten "220" is read from a frame it fills rather than
+ *      from a corner of a photograph.
  *
  * Remove either model and a numbered step above has no replacement.
+ *
+ * Step 2 uses box prompts rather than noun phrases because noun phrases have a
+ * hard failure mode on pencil drawings: a battery drawn as four thin parallel
+ * lines returned zero masks for every phrasing we tried against the live API,
+ * while a box prompt over the same region returns a clean mask. Boxes also give
+ * a 1:1 component-to-mask correspondence, so there is no matching step to get
+ * wrong.
  */
 
 import sharp from 'sharp';
@@ -25,15 +32,33 @@ import type { CircuitComponent, CircuitGraph, Confidence, Net } from '../types';
 import { HttpError, PINS } from '../types';
 import { normaliseType } from '../circuit/graph';
 import { readComponentCrop, readSketch } from '../meta/spark';
-import { segmentConcepts, type SamMask } from '../meta/sam';
-import { markGround, traceNets, type TraceResult } from './trace';
+import {
+  DEFAULT_WIRE_CONCEPTS, isPageFurniture, segmentByBoxes, segmentConcepts, type SamMask,
+} from '../meta/sam';
+import { markGround, reconcileNets, traceNets, type TraceResult } from './trace';
 
-/** Below this pin coverage the mask walk is not trusted and Spark's netlist is used. */
-const TRACE_COVERAGE_MIN = 0.75;
+/**
+ * Below this pin coverage the mask walk has not established enough structure to
+ * build on, and the model's netlist is used wholesale. Above it, the walk leads
+ * and the model only fills the gaps (`reconcileNets`).
+ */
+const TRACE_COVERAGE_MIN = 0.4;
 /** Concurrent per-crop Spark calls. */
 const CROP_CONCURRENCY = 4;
 /** Padding around a component's mask box when cropping, as a fraction of its size. */
 const CROP_PAD = 0.55;
+/**
+ * How much the page-reading stage's estimated box is padded before it is handed
+ * to SAM as a box prompt.
+ *
+ * SAM segments within the region it is given, so a tight prompt yields a tight
+ * mask: prompted with an estimate that clipped a resistor's zigzag, it returns
+ * the clipped zigzag. Prompted with the same box padded, it returns the whole
+ * symbol. The estimate is an estimate, so the prompt gives it room.
+ */
+const BOX_PROMPT_PAD = 0.22;
+/** Components the page read was at least this sure of are not re-read from a crop. */
+const CROP_CONFIDENCE_FLOOR = 0.9;
 
 export interface PerceiveResult extends CircuitGraph {
   confidence: Confidence;
@@ -110,9 +135,26 @@ export async function perceive(
     : await sharp(imageBuffer, { failOn: 'none' }).jpeg({ quality: 90 }).toBuffer();
   const dataUrl = `data:${normalised === imageBuffer ? mime : 'image/jpeg'};base64,${normalised.toString('base64')}`;
 
+  /*
+   * The wire segmentation needs nothing from the page read — the phrasings that
+   * actually find drawn lines are fixed — so it is started first and runs
+   * alongside it. That takes a whole SAM round trip off the critical path, which
+   * is most of the difference between an analysis that feels slow and one that
+   * does not.
+   */
+  const tWires = Date.now();
+  const wirePromise = segmentConcepts(dataUrl, [...DEFAULT_WIRE_CONCEPTS], { signal })
+    .then((r) => { mark('sam_wires_ms', tWires); return r; });
+  // A rejection here is handled where the result is awaited; this keeps Node from
+  // treating it as unhandled in the meantime.
+  wirePromise.catch(() => {});
+
   // ── 1. Whole-page read ────────────────────────────────────────────────────
   const tSpark = Date.now();
-  const reading = await readSketch(dataUrl, { signal });
+  const reading = await readSketch(dataUrl, { signal }).catch((err) => {
+    wirePromise.catch(() => {});
+    throw err;
+  });
   mark('spark_sketch_ms', tSpark);
   if (!reading) {
     throw new HttpError(500, 'Something went wrong analysing that. Try again.', 'spark returned no parseable JSON');
@@ -148,27 +190,90 @@ export async function perceive(
   });
 
   // ── 2. Segmentation ──────────────────────────────────────────────────────
-  const concepts = reading.sam_concepts.length
-    ? reading.sam_concepts.slice(0, 6)
-    : ['drawn wire line', 'hand drawn circuit symbol'];
-  if (!concepts.some(isWireConcept)) concepts.push('drawn wire line');
+  // Two SAM passes: box prompts for the components (exact, 1:1, no failure mode
+  // on thin pencil symbols) and noun phrases for the drawn wires, which have no
+  // box to prompt with and are what the connectivity walk consumes.
+  const wireConcepts = [...DEFAULT_WIRE_CONCEPTS];
+
+  const boxObjects = components
+    .map((c, i) => ({ component: c, index: i }))
+    .filter(({ component }) => component.bbox != null)
+    .map(({ component, index }) => {
+      const [x, y, w, h] = component.bbox!;
+      const padX = Math.max(8, w * BOX_PROMPT_PAD);
+      const padY = Math.max(8, h * BOX_PROMPT_PAD);
+      // Clamp to the image and guarantee a non-empty box, or the prompt builder
+      // rejects the whole request.
+      const left = Math.max(0, Math.min(imageW - 2, Math.round(x - padX)));
+      const top = Math.max(0, Math.min(imageH - 2, Math.round(y - padY)));
+      return {
+        id: index,
+        componentId: component.id,
+        box: {
+          left,
+          top,
+          right: Math.max(left + 1, Math.min(imageW, Math.round(x + w + padX))),
+          bottom: Math.max(top + 1, Math.min(imageH, Math.round(y + h + padY))),
+        },
+      };
+    });
 
   const tSam = Date.now();
-  const segmented = await segmentConcepts(dataUrl, concepts, { signal });
-  mark('sam_ms', tSam);
+  const [boxResult, conceptResults] = await Promise.all([
+    segmentByBoxes(
+      dataUrl,
+      { width: imageW, height: imageH },
+      boxObjects.map(({ id, box }) => ({ id, box })),
+      { signal, nextMaskId: 0 },
+    ),
+    // Already in flight since before the page read returned.
+    wirePromise,
+  ]);
+  mark('sam_boxes_ms', tSam);
 
-  const allMasks = segmented.flatMap((s) => s.masks);
-  const wireMasks = segmented.filter((s) => isWireConcept(s.concept)).flatMap((s) => s.masks);
-  const symbolMasks = allMasks.filter((m) => !isWireConcept(m.concept));
-  const samFailures = segmented.filter((s) => s.masks.length === 0 && s.diagnostics.some((d) => d.startsWith('request failed')));
-  if (samFailures.length) {
-    warnings.push(`Segmentation returned nothing for ${samFailures.length} of ${segmented.length} concepts, so some boxes are estimated rather than measured.`);
+  // Keep mask ids unique across both passes.
+  const conceptMasks = conceptResults.flatMap((r) => r.masks)
+    .map((m, i) => ({ ...m, mask_id: boxResult.masks.length + i }));
+  const segmented = [boxResult, ...conceptResults];
+  const allMasks = [...boxResult.masks, ...conceptMasks];
+  const wireMasks = conceptMasks
+    .filter((m) => isWireConcept(m.concept))
+    .filter((m) => !isPageFurniture(m, imageW, imageH));
+  const symbolMasks = [
+    ...boxResult.masks,
+    ...conceptMasks.filter((m) => !isWireConcept(m.concept)),
+  ];
+
+  if (wireMasks.length === 0) {
+    warnings.push('No wire lines could be segmented from this image, so connectivity could not be traced from the drawing itself.');
+  }
+  const boxFailures = boxResult.diagnostics.filter((d) => d.startsWith('prompt rejected') || d.startsWith('request failed'));
+  if (boxFailures.length) {
+    warnings.push('Component outlines could not be measured for this image, so their positions are estimated rather than segmented.');
   }
 
   // ── 3. Replace estimated boxes with measured mask boxes ──────────────────
-  const taken = new Set<number>();
+  // The box-prompt masks come back under the id we supplied, so this is a lookup
+  // rather than a match. Only components SAM declined to segment fall through to
+  // the geometric matching below.
+  const byObjectId = new Map(boxResult.masks.map((m) => [String(m.objectId ?? ''), m]));
+  const claimed = new Set<number>();
+  components = components.map((c, i) => {
+    const direct = byObjectId.get(String(i));
+    if (!direct) return c;
+    claimed.add(direct.mask_id);
+    return {
+      ...c,
+      bbox: toXYWH(direct),
+      mask_id: direct.mask_id,
+      confidence: Math.max(c.confidence, direct.confidence ?? 0),
+    };
+  });
+
+  // Fallback for anything still unmeasured: nearest noun-phrase mask by overlap.
+  const taken = new Set<number>(claimed);
   components = components.map((c) => {
-    if (!c.bbox) return c;
+    if (c.mask_id != null || !c.bbox) return c;
     let best: { mask: SamMask; score: number } | null = null;
     for (const m of symbolMasks) {
       if (taken.has(m.mask_id)) continue;
@@ -192,13 +297,36 @@ export async function perceive(
   if (wireMasks.length > 0 && components.some((c) => c.bbox)) {
     // Pins are placed from the canonical pin list, so fill it in first.
     const withPins = components.map((c) => ({ ...c, pins: pinsFor(c) }));
-    trace = traceNets(withPins, wireMasks, imageW, imageH);
+    const maskById = new Map<string, SamMask>();
+    for (const c of components) {
+      const m = c.mask_id != null ? allMasks.find((x) => x.mask_id === c.mask_id) : undefined;
+      if (m) maskById.set(c.id, m);
+    }
+    trace = traceNets(withPins, wireMasks, imageW, imageH, maskById);
   }
   mark('trace_ms', tTrace);
 
-  // ── 5. Per-crop value reading ────────────────────────────────────────────
+  /*
+   * ── 5. Per-crop value reading ───────────────────────────────────────────
+   *
+   * Only what the page read was unsure about. The whole-page pass frequently
+   * reads every value correctly, and re-reading a confidently-read "220" from
+   * its own crop costs several seconds to confirm what is already known. So the
+   * crop pass is spent where it has something to add: a value that came back
+   * empty, a symbol the model was hesitant about, or a part whose polarity
+   * matters and was not reported.
+   */
+  const needsCrop = (c: CircuitComponent): boolean => {
+    if (!c.bbox || c.type === 'junction' || c.type === 'ground') return false;
+    const expectsValue = !['ground', 'junction', 'switch', 'transistor', 'ic', 'header', 'crystal'].includes(c.type);
+    if (expectsValue && (c.value == null || c.value === '')) return true;
+    if (c.confidence < CROP_CONFIDENCE_FLOOR) return true;
+    const polarised = ['led', 'diode', 'battery', 'capacitor_electrolytic'].includes(c.type);
+    return polarised && !c.orientation;
+  };
+
   const tCrops = Date.now();
-  const croppable = components.filter((c) => c.bbox && c.type !== 'junction');
+  const croppable = components.filter(needsCrop);
   const crops = await mapLimit(croppable, CROP_CONCURRENCY, async (c) => {
     try {
       const [x, y, w, h] = c.bbox!;
@@ -224,6 +352,7 @@ export async function perceive(
     }
   });
   mark('crops_ms', tCrops);
+  timings.crops_requested = croppable.length;
 
   let valueConfSum = 0;
   let valueConfCount = 0;
@@ -257,17 +386,28 @@ export async function perceive(
     .filter((n) => Array.isArray(n.pins) && n.pins.length > 0)
     .map((n, i) => ({ id: `S${i + 1}`, pins: n.pins.map(String), is_ground: n.is_ground, source: 'model' as const }));
 
-  const traceUsable = trace != null && trace.coverage >= TRACE_COVERAGE_MIN && trace.nets.length >= 2;
+  const traceUsable = trace != null && trace.coverage >= TRACE_COVERAGE_MIN && trace.nets.length >= 1;
   let nets: Net[];
+  let inferredPins: string[] = [];
   if (traceUsable) {
-    nets = markGround(trace!.nets, components);
+    const reconciled = reconcileNets(trace!.nets, sparkNets, trace!.floating);
+    nets = markGround(reconciled.nets, components);
+    inferredPins = reconciled.inferred;
+    if (inferredPins.length > 0) {
+      warnings.push(
+        `${inferredPins.length} of ${trace!.anchors.length} component leads could not be traced to a drawn wire, so ${inferredPins.length === 1 ? 'that connection was' : 'those connections were'} taken from the model instead: ${inferredPins.join(', ')}. Check ${inferredPins.length === 1 ? 'it' : 'them'} in the inspector.`,
+      );
+    }
+    if (reconciled.stillFloating.length > 0) {
+      warnings.push(
+        `${reconciled.stillFloating.join(', ')} ${reconciled.stillFloating.length === 1 ? 'connects' : 'connect'} to nothing that could be found in the drawing.`,
+      );
+    }
   } else {
     nets = sparkNets;
     if (trace) {
       warnings.push(
-        trace.nets.length < 2
-          ? 'The wire mask did not resolve into separate connections, so connectivity came from the model rather than from the traced lines. Check each connection.'
-          : `Only ${Math.round(trace.coverage * 100)}% of component leads could be traced to a drawn wire, so connectivity came from the model rather than from the traced lines. Check each connection.`,
+        `Only ${Math.round(trace.coverage * 100)}% of component leads could be traced to a drawn wire, so connectivity came from the model rather than from the traced lines. Check each connection.`,
       );
     } else if (wireMasks.length === 0) {
       warnings.push('No wire lines were segmented, so connectivity came from the model rather than from the traced lines. Check each connection.');
@@ -284,13 +424,25 @@ export async function perceive(
   // Measured geometry is worth more than a described box, so matching masks lifts
   // component confidence; an unverified estimate holds it down.
   const matchRatio = components.length ? matched / components.length : 0;
+  // Confidence tracks the share of leads actually measured rather than inferred,
+  // so a reconciled result is honest about the part the model supplied.
+  const verifiedShare = traceUsable && trace!.anchors.length
+    ? (trace!.anchors.length - inferredPins.length) / trace!.anchors.length
+    : 0;
   const connectivityConf = traceUsable
-    ? Math.min(0.99, 0.6 + 0.39 * trace!.coverage)
+    ? Math.min(0.99, 0.55 + 0.44 * verifiedShare)
     : Math.min(reading.confidence.connectivity, 0.7);
   const confidence: Confidence = {
     components: clamp01(componentConf * (0.8 + 0.2 * matchRatio)),
     connectivity: clamp01(connectivityConf),
-    values: clamp01(valueConfCount ? valueConfSum / valueConfCount : reading.confidence.values),
+    // Where no crop was needed the page read's own assessment stands; where crops
+    // ran, they are the better witness and are blended with it.
+    values: clamp01(
+      valueConfCount
+        ? (valueConfSum + reading.confidence.values * (components.length - valueConfCount))
+          / Math.max(1, components.length)
+        : reading.confidence.values,
+    ),
   };
 
   if (confidence.connectivity < 0.85) {
@@ -312,7 +464,7 @@ export async function perceive(
     warnings,
     notes,
     segmentation: {
-      concept_counts: Object.fromEntries(segmented.map((s) => [s.concept, s.masks.length])),
+      concept_counts: Object.fromEntries(segmented.map((r) => [r.concept, r.masks.length])),
       masks: allMasks.slice(0, 40).map((m) => ({
         mask_id: m.mask_id,
         concept: m.concept,
@@ -327,7 +479,9 @@ export async function perceive(
     timings: {
       ...timings,
       ...(trace ? { trace_coverage: Math.round(trace.coverage * 100), trace_regions: trace.regions } : {}),
-      sam_concepts: concepts.length,
+      sam_wire_concepts: wireConcepts.length,
+      sam_box_prompts: boxObjects.length,
+      sam_box_masks: boxResult.masks.length,
       sam_masks: allMasks.length,
     },
   };

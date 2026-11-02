@@ -18,7 +18,7 @@ async function main() {
 
   const sample = process.env.SAMPLE ?? 'The one that burns out';
   await page.getByRole('button', { name: new RegExp(sample, 'i') }).click();
-  await page.waitForSelector('canvas', { timeout: 60_000 });
+  await page.waitForSelector('canvas', { timeout: 180_000 });
   await page.waitForTimeout(3500);
   await page.screenshot({ path: `${OUT}/02-result.png` });
 
