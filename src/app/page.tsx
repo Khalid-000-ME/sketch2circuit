@@ -6,6 +6,7 @@ import Findings from '@/components/Findings';
 import Inspector from '@/components/Inspector';
 import SourceImage from '@/components/SourceImage';
 import StageStatus from '@/components/StageStatus';
+import Schematic from '@/components/Schematic';
 import Viewer from '@/components/Viewer';
 import {
   analyze, ApiError, fetchStatus, prepareImage, simulate, toSpiceNetlist, type SampleInfo,
@@ -13,6 +14,12 @@ import {
 import type { AnalyzeResponse, CircuitComponent, Net } from '@/lib/types';
 
 type Phase = 'capture' | 'analysing' | 'result';
+/**
+ * Schematic by default: it is the representation a beginner will meet everywhere
+ * else, and at these scales a true-to-life 3D board makes a 9V block dwarf a 5mm
+ * LED, which is accurate and unhelpful. The 3D board stays one click away.
+ */
+type ViewMode = 'schematic' | 'board';
 
 /** Honest stage labels, shown in the order the pipeline actually runs them. */
 const STAGE_LABELS = [
@@ -38,6 +45,7 @@ export default function Page() {
   const [focusToken, setFocusToken] = useState(0);
   const [stage, setStage] = useState(0);
   const [resimulating, setResimulating] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('schematic');
 
   const abortRef = useRef<AbortController | null>(null);
   const editSeq = useRef(0);
@@ -247,6 +255,21 @@ export default function Page() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <div className="flex rounded-md border border-edge p-0.5" role="group" aria-label="View">
+            {([['schematic', 'Schematic'], ['board', '3D board']] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                aria-pressed={viewMode === mode}
+                className={`h-8 rounded px-2.5 text-[12px] transition ${
+                  viewMode === mode ? 'bg-accent/15 text-accent' : 'text-faint hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {result?.timings?.total_ms != null && (
             <span className="hidden text-[11px] text-faint sm:inline">
               analysed in {(Number(result.timings.total_ms) / 1000).toFixed(1)}s
@@ -263,21 +286,37 @@ export default function Page() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative h-[46vh] min-h-[320px] shrink-0 bg-bg lg:h-auto lg:min-h-0 lg:flex-1">
-          <Viewer
-            circuitId={result?.circuit_id ?? 'none'}
-            components={components}
-            nets={nets}
-            simulation={simulation}
-            findings={findings}
-            selectedId={selectedId}
-            focusToken={focusToken}
-            onSelect={setSelectedId}
-            onHover={() => {}}
-          />
-          <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-faint">
-            Drag to orbit · pinch or scroll to zoom · tap a component
-          </p>
+        <div className="workspace-grid relative h-[46vh] min-h-[320px] shrink-0 bg-bg lg:h-auto lg:min-h-0 lg:flex-1">
+          {viewMode === 'schematic' ? (
+            <Schematic
+              circuitId={result?.circuit_id ?? 'none'}
+              components={components}
+              nets={nets}
+              simulation={simulation}
+              findings={findings}
+              selectedId={selectedId}
+              focusToken={focusToken}
+              onSelect={setSelectedId}
+              onHover={() => {}}
+            />
+          ) : (
+            <>
+              <Viewer
+                circuitId={result?.circuit_id ?? 'none'}
+                components={components}
+                nets={nets}
+                simulation={simulation}
+                findings={findings}
+                selectedId={selectedId}
+                focusToken={focusToken}
+                onSelect={setSelectedId}
+                onHover={() => {}}
+              />
+              <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-faint">
+                Drag to orbit · pinch or scroll to zoom · tap a component
+              </p>
+            </>
+          )}
         </div>
 
         <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-t border-edge p-4 lg:w-[400px] lg:border-l lg:border-t-0 xl:w-[440px]">

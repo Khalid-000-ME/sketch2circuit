@@ -87,3 +87,102 @@ body {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* ───────────────────────────────── Schematic view ─────────────────────────
+   Symbols are drawn as strokes, so almost everything here is a stroke colour
+   and a width. Severity is carried by colour *and* by the pulse and the icon in
+   the findings list, never by colour alone. */
+
+.schematic-wires .wire {
+  fill: none;
+  stroke: #8fa3bb;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.schematic-wires .wire--ground { stroke: #6b7a8d; }
+/* A connection the mask walk could not confirm: dashed, so it reads as provisional. */
+.schematic-wires .wire--inferred { stroke-dasharray: 7 4; stroke: #7aa2ff; }
+
+.wire-junction { fill: #8fa3bb; stroke: none; }
+
+/* Current flow: a dash pattern scrolling along the wire it is drawn over. */
+.wire-flow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 2 16;
+  opacity: 0.95;
+  animation-name: flow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes flow { from { stroke-dashoffset: 18; } to { stroke-dashoffset: 0; } }
+
+.symbol {
+  fill: none;
+  stroke: #d7e0ea;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 140ms ease;
+}
+/* Closed shapes — diode and LED bodies, DIP outlines — read as filled. */
+.symbol path:not([fill="none"]),
+.symbol rect { fill: #d7e0ea; }
+.symbol .symbol-envelope { fill: none; }
+.symbol .symbol-node { fill: #d7e0ea; stroke: none; }
+.symbol .symbol-junction { fill: #d7e0ea; stroke: none; }
+.symbol .symbol-arrow path { fill: none; }
+
+.symbol .symbol-glyph,
+.symbol .symbol-polarity {
+  fill: #d7e0ea;
+  stroke: none;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  text-anchor: middle;
+}
+.symbol .symbol-glyph { font-size: 17px; font-weight: 600; }
+.symbol .symbol-polarity { font-size: 15px; font-weight: 600; }
+
+.symbol--hover { stroke: #ffffff; }
+.symbol--hover path:not([fill="none"]), .symbol--hover rect { fill: #ffffff; }
+
+.symbol--selected { stroke: var(--accent); }
+.symbol--selected path:not([fill="none"]),
+.symbol--selected rect,
+.symbol--selected .symbol-node,
+.symbol--selected .symbol-glyph,
+.symbol--selected .symbol-polarity { fill: var(--accent); }
+
+.symbol--error { stroke: var(--error); animation: fault-pulse 1.9s ease-in-out infinite; }
+.symbol--error path:not([fill="none"]), .symbol--error rect { fill: var(--error); }
+.symbol--warning { stroke: var(--warn); animation: fault-pulse 2.4s ease-in-out infinite; }
+.symbol--warning path:not([fill="none"]), .symbol--warning rect { fill: var(--warn); }
+@keyframes fault-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.symbol-label text {
+  stroke: none;
+  text-anchor: middle;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  pointer-events: none;
+}
+.symbol-ref { fill: #aebbcc; font-size: 13px; font-weight: 600; }
+.symbol-value { fill: #7d8da1; font-size: 12px; }
+.symbol-label--selected .symbol-ref,
+.symbol-label--selected .symbol-value { fill: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .wire-flow { animation: none; opacity: 0.5; }
+  .symbol--error, .symbol--warning { animation: none; }
+}
+
+/* A halo in the background colour, so a label stays readable where a wire
+   passes behind it. Cheaper and cleaner than reserving space for every label. */
+.symbol-label text {
+  paint-order: stroke fill;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}

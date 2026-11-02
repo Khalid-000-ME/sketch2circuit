@@ -18,9 +18,17 @@ async function main() {
 
   const sample = process.env.SAMPLE ?? 'The one that burns out';
   await page.getByRole('button', { name: new RegExp(sample, 'i') }).click();
-  await page.waitForSelector('canvas', { timeout: 180_000 });
+  await page.waitForSelector('main > header', { timeout: 180_000 });
   await page.waitForTimeout(3500);
   await page.screenshot({ path: `${OUT}/02-result.png` });
+
+  // The 3D board is still available behind the view toggle.
+  await page.getByRole('button', { name: '3D board' }).click();
+  await page.waitForSelector('canvas', { timeout: 30_000 });
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: `${OUT}/02b-board.png` });
+  await page.getByRole('button', { name: 'Schematic' }).click();
+  await page.waitForTimeout(800);
 
   // Click the first finding, which should select and focus its component.
   const finding = page.locator('aside button').first();

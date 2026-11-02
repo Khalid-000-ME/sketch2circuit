@@ -154,6 +154,15 @@ These are measurements, not guesses, and several contradicted the plan:
   same sketches came back with duplicated components, no values at all and
   unusable connectivity — and not faster, since a confused read reasons longer.
 
+### A note on the two views
+
+The 3D board came first and is accurate to a fault: a 9V PP3 really is 48mm long
+and a 5mm LED really is 5mm, so a true-to-life board makes the battery dwarf
+everything that matters. Accurate and unhelpful. The schematic became the default
+for that reason; the board stays one click away, because watching a circuit
+assemble itself is a better twenty seconds of video than watching a diagram
+appear.
+
 ### Latency
 
 The page read is essentially the whole cost:
@@ -224,7 +233,44 @@ reason plus the rule checks that do not need a solution, rather than an error.
 
 ---
 
-## The renderer
+## The views
+
+There are two, and the **schematic is the default**.
+
+### Schematic (default)
+
+Plain SVG. Standard symbols — zigzag resistor, triangle-and-bar LED,
+long-and-short battery plates, a curved negative plate on an electrolytic — on a
+grid, with orthogonal wires, junction dots where three or more leads meet, and a
+reference designator and value beside every part. It is the representation a
+beginner meets in every textbook and every other simulator, which is the point:
+nothing about the drawing needs explaining.
+
+SVG rather than canvas because a schematic is a few hundred lines and labels,
+every one of which wants to be a hit target, a focus target and a CSS state.
+In the DOM, hover, selection, keyboard traversal and the fault pulse come almost
+free, and it stays crisp at any zoom.
+
+Three details worth knowing, each of which fixed a visible defect:
+
+- **Labels are offset by the body, not the pin span.** Offsetting by the pin span
+  pushes a label past the part's own leads and onto whatever wire runs there. A
+  vertical part puts both labels to its right, because above and below is exactly
+  where its leads are.
+- **A part is scored against its own 180° flip.** The bearing between neighbour
+  centroids picks the right axis but not always the right end — on a node joining
+  five leads the centroid says nothing about which side of *this* part it is on.
+  A part turned the wrong way sends each lead away from the node it joins, and
+  the router doubles back, leaving a spur past the component.
+- **A part is then pulled between the two nodes it joins**, into a space that is
+  actually free. The relaxation only knows that connected things attract, so it
+  will leave a decoupling capacitor above both of the rails it bridges, where
+  every wire leaving it runs back through its own body.
+
+Inferred connections — the ones the mask walk could not confirm — are drawn
+dashed, so provisional topology looks provisional.
+
+### 3D board
 
 Three.js, vanilla, no framework wrapper. **Every component is generated in code**
 ([`src/three/components.ts`](src/three/components.ts)) — nothing is modelled or
@@ -325,6 +371,10 @@ src/
 │   │   ├── rules.ts              the rule-check suite
 │   │   └── units.ts              handwritten value parsing: "4k7" → 4700
 │   └── client/api.ts             fetch wrappers, downscaling, SPICE export
+├── schematic/
+│   ├── symbols.tsx               one SVG symbol per type, pins and body extents
+│   ├── layout2d.ts               grid placement, axis snapping, orientation
+│   └── route2d.ts                orthogonal wire routing
 ├── three/
 │   ├── scene.ts                  renderer, IBL, camera, picking, loop
 │   ├── components.ts             procedural geometry — the core

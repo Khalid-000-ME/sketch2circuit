@@ -12,13 +12,15 @@ async function main() {
 
   await page.goto('http://localhost:3111', { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /circuit that works/i }).click();
-  // Live analysis takes about half a minute, so this waits well past it.
-  await page.waitForSelector('canvas', { timeout: 180_000 });
+  // Live analysis takes about half a minute, so this waits well past it. The
+  // result header is view-agnostic: the schematic is SVG, the board is a canvas.
+  await page.waitForSelector('main > header', { timeout: 180_000 });
   await page.waitForTimeout(2500);
   console.log('before edit:', (await page.locator('main > header').innerText()).replace(/\n/g, ' | '));
 
-  // Select R1 from the component list and drop its value to something unsafe.
-  await page.getByRole('button', { name: /^R1/ }).click();
+  // Select R1 from the component chips in the side panel. Scoped to the aside,
+  // because the schematic's own hit targets are buttons named R1 as well.
+  await page.locator('aside').getByRole('button', { name: /^R1/ }).click();
   await page.waitForTimeout(500);
   const input = page.locator('input[inputmode="decimal"]').first();
   await input.fill('22');
