@@ -8,8 +8,6 @@
  *   - a junction dot sitting on a wire of a net it does not belong to, which is
  *     how a schematic says "these are connected";
  *   - a wire running through a component it does not connect to;
- *   - a wire that doubles back over its own part's lead to reach its node, which
- *     draws as a spur sticking out past it;
  *   - labels sitting on other labels, on other parts, or on wires; parts on parts;
  *   - on a board, a wire that crosses its body, or one that touches the tip of a
  *     pin it does not belong to — a wire running along a column of pin tips reads
@@ -92,9 +90,9 @@ export function findConflicts(
     const p = layout.placements.get(c.id);
     if (!p) continue;
     const [bx, by] = p.rotation % 180 === 0 ? p.bodyHalf : [p.bodyHalf[1], p.bodyHalf[0]];
-    const own = new Set(c.pins.map((pin) => `${c.id}.${pin}`));
+    // Every wire counts, the part's own included. A wire from a pin that runs
+    // across the part it came from reads as that part being shorted out.
     for (const s of segs) {
-      if (own.has(s.pinRef)) continue;
       const horizontal = s.y1 === s.y2;
       const inside = horizontal
         ? Math.abs(s.y1 - p.position.y) < by
@@ -105,15 +103,17 @@ export function findConflicts(
     }
   }
 
-  // A lead whose node lies behind it. Skipped for a net holding two pins of the
+  // A lead whose node lies behind it. The router will detour round the part, so
+  // this is no longer wrong, but a detour is a spur by another name, and a layout
+  // that turned the part the right way round has none. Without this penalty the
+  // arrangement has no reason to try. Skipped for a net holding two pins of the
   // same part: that is a part shorted across itself, its leads face opposite
-  // ways, and no node can lie outward of both. The drawing is meant to look odd.
+  // ways, and no node can lie outward of both.
   for (const net of routes) {
     const owners = net.wires.map((w) => w.pinRef.slice(0, w.pinRef.lastIndexOf('.')));
-    const shorted = new Set(owners).size < owners.length;
-    if (shorted) continue;
+    if (new Set(owners).size < owners.length) continue;
     for (const wire of net.wires) {
-      if (wire.backtracks) problems.push(`${wire.pinRef} doubles back over its own lead to reach ${net.netId}`);
+      if (wire.backtracks) problems.push(`${wire.pinRef} runs back past its own part to reach ${net.netId}`);
     }
   }
 

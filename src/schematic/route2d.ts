@@ -56,27 +56,51 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/** Builds the path from a pin to the hub: stub, then at most two turns. */
-function pathToHub(from: Vec, dir: Vec, hub: Vec): { d: string; length: number } {
-  // The stub only earns its place when it heads toward the node. Pointing the
-  // other way it becomes a spur past the component that the wire then doubles
-  // back along — so in that case the wire leaves the pin straight for the hub.
-  const towardHub = dir.x * (hub.x - from.x) + dir.y * (hub.y - from.y) > 0;
-  const stub: Vec = towardHub
-    ? { x: from.x + dir.x * GRID, y: from.y + dir.y * GRID }
-    : { ...from };
-  const points: Vec[] = [from, stub];
+/** How far a detour stands off the part it goes around, in grid steps. */
+const DETOUR_CLEARANCE = GRID * 1.5;
 
-  if (dir.x !== 0) {
-    // Left the pin horizontally, so travel horizontally first.
-    if (stub.x !== hub.x) points.push({ x: hub.x, y: stub.y });
-    if (stub.y !== hub.y) points.push({ x: hub.x, y: hub.y });
+/**
+ * Builds the path from a pin to the hub.
+ *
+ * Normally: a lead out of the pin, then at most two turns. When the hub lies
+ * behind the pin, though, the straight way to it is through the part the pin
+ * belongs to, and a wire drawn across a resistor looks like the resistor is
+ * shorted out. So the wire leaves the pin, steps clear of the body to the side,
+ * runs past it, and only then turns toward the hub.
+ */
+function pathToHub(from: Vec, dir: Vec, hub: Vec): { d: string; length: number } {
+  const ahead = dir.x * (hub.x - from.x) + dir.y * (hub.y - from.y);
+  const stub: Vec = { x: from.x + dir.x * GRID, y: from.y + dir.y * GRID };
+  const points: Vec[] = [from];
+
+  if (ahead < 0) {
+    // The hub is behind the pin. Go out, step aside, run past the body, come back.
+    const perp: Vec = { x: -dir.y, y: dir.x };
+    const lateral = perp.x * (hub.x - from.x) + perp.y * (hub.y - from.y);
+    const side = lateral === 0 ? 1 : Math.sign(lateral);
+    const offset = side * Math.max(DETOUR_CLEARANCE, Math.abs(lateral));
+    const aside: Vec = { x: stub.x + perp.x * offset, y: stub.y + perp.y * offset };
+    // Along the body's axis to the hub's coordinate, keeping the sideways offset.
+    const along = dir.x !== 0 ? hub.x : hub.y;
+    const past: Vec = dir.x !== 0 ? { x: along, y: aside.y } : { x: aside.x, y: along };
+    points.push(stub, aside, past, hub);
   } else {
-    if (stub.y !== hub.y) points.push({ x: stub.x, y: hub.y });
-    if (stub.x !== hub.x) points.push({ x: hub.x, y: hub.y });
-  }
-  if (points[points.length - 1].x !== hub.x || points[points.length - 1].y !== hub.y) {
-    points.push({ x: hub.x, y: hub.y });
+    // The lead out of the pin is only worth drawing when the node is strictly
+    // ahead of it. Level with the pin, or on it, a lead would only go out and
+    // come straight back: a spur on every connection between touching parts.
+    const start = ahead > 0 ? stub : from;
+    if (ahead > 0) points.push(stub);
+    if (dir.x !== 0) {
+      // Left the pin horizontally, so travel horizontally first.
+      if (start.x !== hub.x) points.push({ x: hub.x, y: start.y });
+      if (start.y !== hub.y) points.push({ x: hub.x, y: hub.y });
+    } else {
+      if (start.y !== hub.y) points.push({ x: start.x, y: hub.y });
+      if (start.x !== hub.x) points.push({ x: hub.x, y: hub.y });
+    }
+    if (points[points.length - 1].x !== hub.x || points[points.length - 1].y !== hub.y) {
+      points.push({ x: hub.x, y: hub.y });
+    }
   }
 
   // Collapse any zero-length steps the stub may have produced.
