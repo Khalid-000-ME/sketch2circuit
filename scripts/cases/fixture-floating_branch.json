@@ -1,0 +1,85 @@
+{
+ "components": [
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "330",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "led",
+   "value": "red",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "anode",
+    "cathode"
+   ]
+  },
+  {
+   "id": "R2",
+   "type": "resistor",
+   "value": "2k2",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "D1.cathode"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "R1.a"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "D1.anode",
+    "R1.b",
+    "R2.a"
+   ]
+  }
+ ]
+}

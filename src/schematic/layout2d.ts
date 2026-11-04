@@ -28,6 +28,12 @@ export interface Placement2D {
 
 export interface Layout2D {
   placements: Map<string, Placement2D>;
+  /**
+   * Whether nets meet outward of every lead (true) or at the median of their
+   * pins (false). Part of the layout, because the arrangement is only good for
+   * the routing it was scored with.
+   */
+  outwardHubs?: boolean;
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -292,11 +298,19 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     if (!changed) break;
   }
 
-  // ── Bounds, including every pin so nothing is clipped ─────────────────────
+  return { placements, bounds: boundsOf(components, placements) };
+}
+
+/** The drawing's extent, including every pin so nothing is clipped. */
+export function boundsOf(
+  components: CircuitComponent[],
+  placements: Map<string, Placement2D>,
+): Layout2D['bounds'] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  components.forEach((c, i) => {
-    const p = placements.get(c.id)!;
-    const def = defs[i];
+  for (const c of components) {
+    const p = placements.get(c.id);
+    if (!p) continue;
+    const def = symbolFor(c);
     const corners: Vec[] = [
       ...Object.values(def.pins).map(([x, y]) => rotate({ x, y }, p.rotation)),
       rotate({ x: def.half[0], y: def.half[1] }, p.rotation),
@@ -310,10 +324,9 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
       minY = Math.min(minY, p.position.y + corner.y);
       maxY = Math.max(maxY, p.position.y + corner.y);
     }
-  });
+  }
   if (!Number.isFinite(minX)) { minX = -100; minY = -100; maxX = 100; maxY = 100; }
-
-  return { placements, bounds: { minX, minY, maxX, maxY } };
+  return { minX, minY, maxX, maxY };
 }
 
 /** Rotates a local offset by a multiple of 90 degrees. */

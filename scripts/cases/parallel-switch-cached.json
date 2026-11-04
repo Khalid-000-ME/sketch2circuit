@@ -1,0 +1,173 @@
+{
+ "circuit_id": "c_sample_parallel-switch",
+ "components": [
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "SW1",
+   "type": "switch",
+   "value": "closed",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "470",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "R2",
+   "type": "resistor",
+   "value": "1k",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "led",
+   "value": "green",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "anode",
+    "cathode"
+   ]
+  },
+  {
+   "id": "C1",
+   "type": "capacitor",
+   "value": "10u",
+   "unit": "F",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "C1.b",
+    "D1.cathode",
+    "R2.b"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "SW1.a"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "C1.a",
+    "R1.a",
+    "R2.a",
+    "SW1.b"
+   ]
+  },
+  {
+   "id": "N4",
+   "pins": [
+    "D1.anode",
+    "R1.b"
+   ]
+  }
+ ],
+ "confidence": {
+  "components": 0.91,
+  "connectivity": 0.84,
+  "values": 0.86
+ },
+ "simulation": {
+  "status": "ok",
+  "node_voltages": {
+   "N1": 0,
+   "N2": 8.959955679963121,
+   "N3": 8.959932124489708,
+   "N4": 2.1000319335746576
+  },
+  "component_results": {
+   "B1": {
+    "current_a": 0.02355548237463407,
+    "voltage_v": 8.959955679963121,
+    "power_w": 0.21199934137170662
+   },
+   "SW1": {
+    "current_a": 0.02355547341359454,
+    "voltage_v": 0.00002355547341359454,
+    "power_w": 5.548603277385592e-7
+   },
+   "R1": {
+    "current_a": 0.014595532321095853,
+    "voltage_v": 6.8599001909150505,
+    "power_w": 0.10012389495599223
+   },
+   "R2": {
+    "current_a": 0.008959932124489707,
+    "voltage_v": 8.959932124489708,
+    "power_w": 0.08028038367546264
+   },
+   "D1": {
+    "current_a": 0.01459553022106394,
+    "voltage_v": 2.1000319335746576,
+    "power_w": 0.030651079551688255
+   },
+   "C1": {
+    "current_a": 0,
+    "voltage_v": 8.959932124489708,
+    "power_w": 0
+   }
+  },
+  "iterations": 10
+ },
+ "findings": [],
+ "warnings": []
+}

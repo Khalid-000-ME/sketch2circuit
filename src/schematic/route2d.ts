@@ -22,6 +22,12 @@ export interface RoutedWire {
   /** SVG path data, orthogonal throughout. */
   d: string;
   length: number;
+  /**
+   * True when the node lies behind the pin, so the wire has to run back over the
+   * part's own lead to reach it. Drawn, that is a spur sticking out past the
+   * node, and it reads as the lead continuing somewhere it does not.
+   */
+  backtracks: boolean;
 }
 
 export interface RoutedNet {
@@ -78,6 +84,34 @@ function pathToHub(from: Vec, dir: Vec, hub: Vec): { d: string; length: number }
   };
 }
 
+/**
+ * Where the leads of a net meet.
+ *
+ * The median is a good centre, but it knows nothing about which way each lead
+ * points. Every lead leaves its part in one direction, and a node lying behind
+ * it forces the wire back over the lead it just left. So the node is kept on the
+ * outward side of every lead that constrains it: no further left than a
+ * left-facing lead, no further right than a right-facing one, and likewise
+ * vertically. The axes are independent, and when leads disagree on one the
+ * median stands, since no node can satisfy them all.
+ */
+function hubFor(ends: Array<{ at: Vec; dir: Vec }>, outward: boolean): Vec {
+  let x = snap(median(ends.map((e) => e.at.x)));
+  let y = snap(median(ends.map((e) => e.at.y)));
+  if (!outward) return { x, y };
+
+  let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
+  for (const e of ends) {
+    if (e.dir.x < 0) maxX = Math.min(maxX, e.at.x);
+    if (e.dir.x > 0) minX = Math.max(minX, e.at.x);
+    if (e.dir.y < 0) maxY = Math.min(maxY, e.at.y);
+    if (e.dir.y > 0) minY = Math.max(minY, e.at.y);
+  }
+  if (minX <= maxX) x = Math.min(maxX, Math.max(minX, x));
+  if (minY <= maxY) y = Math.min(maxY, Math.max(minY, y));
+  return { x, y };
+}
+
 export function routeSchematic(
   components: CircuitComponent[],
   nets: Net[],
@@ -105,10 +139,7 @@ export function routeSchematic(
 
     if (ends.length < 2) continue;
 
-    const hub: Vec = {
-      x: snap(median(ends.map((e) => e.at.x))),
-      y: snap(median(ends.map((e) => e.at.y))),
-    };
+    const hub = hubFor(ends, layout.outwardHubs ?? false);
 
     routed.push({
       netId: net.id,
@@ -118,7 +149,8 @@ export function routeSchematic(
       inferred: net.source === 'model',
       wires: ends.map((e) => {
         const { d, length } = pathToHub(e.at, e.dir, hub);
-        return { netId: net.id, pinRef: e.ref, d, length };
+        const backtracks = e.dir.x * (hub.x - e.at.x) + e.dir.y * (hub.y - e.at.y) < 0;
+        return { netId: net.id, pinRef: e.ref, d, length, backtracks };
       }),
     });
   }

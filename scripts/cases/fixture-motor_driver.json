@@ -1,0 +1,93 @@
+{
+ "components": [
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "M1",
+   "type": "motor",
+   "value": "10",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "Q1",
+   "type": "transistor",
+   "value": "NPN",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "base",
+    "collector",
+    "emitter"
+   ]
+  },
+  {
+   "id": "SW1",
+   "type": "switch",
+   "value": "closed",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "Q1.emitter"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "M1.a",
+    "SW1.b"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "M1.b",
+    "Q1.collector"
+   ]
+  },
+  {
+   "id": "N4",
+   "pins": [
+    "Q1.base",
+    "SW1.a"
+   ]
+  }
+ ]
+}
