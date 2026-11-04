@@ -31,6 +31,7 @@ import sharp from 'sharp';
 import type { CircuitComponent, CircuitGraph, Confidence, Net } from '../types';
 import { HttpError, PINS } from '../types';
 import { normaliseType } from '../circuit/graph';
+import { isBoardType } from '../circuit/boards';
 import { readComponentCrop, readSketch } from '../meta/spark';
 import {
   DEFAULT_WIRE_CONCEPTS, isPageFurniture, segmentByBoxes, segmentConcepts, type SamMask,
@@ -335,7 +336,7 @@ export async function perceive(
    */
   const needsCrop = (c: CircuitComponent): boolean => {
     if (!c.bbox || c.type === 'junction' || c.type === 'ground') return false;
-    const expectsValue = !['ground', 'junction', 'switch', 'transistor', 'ic', 'header', 'crystal'].includes(c.type);
+    const expectsValue = !['ground', 'junction', 'switch', 'transistor', 'ic', 'header', 'crystal', 'arduino_uno', 'raspberry_pi'].includes(c.type);
     if (expectsValue && (c.value == null || c.value === '')) return true;
     if (c.confidence < CROP_CONFIDENCE_FLOOR) return true;
     const polarised = ['led', 'diode', 'battery', 'capacitor_electrolytic'].includes(c.type);
@@ -407,12 +408,32 @@ export async function perceive(
   let nets: Net[];
   let inferredPins: string[] = [];
   if (traceUsable) {
-    const reconciled = reconcileNets(trace!.nets, sparkNets, trace!.floating);
+    // A board's pins have no geometry to trace, only a label the model read, so
+    // they never appear among the trace's anchors. They are still part of the
+    // circuit, and the model's nets are where they come from: each joins the
+    // traced net that the model says its wire is part of.
+    const anchored = new Set(trace!.anchors.map((a) => a.ref));
+    const boardIds = new Set(components.filter((c) => isBoardType(c.type)).map((c) => c.id));
+    const unanchored = sparkNets
+      .flatMap((n) => n.pins)
+      .filter((ref) => !anchored.has(ref) && boardIds.has(ref.slice(0, ref.lastIndexOf('.'))));
+    const reconciled = reconcileNets(trace!.nets, sparkNets, [...trace!.floating, ...unanchored]);
     nets = markGround(reconciled.nets, components);
     inferredPins = reconciled.inferred;
-    if (inferredPins.length > 0) {
+    // Two different things were supplied by the model, and only one of them is a
+    // shortfall. A lead the trace could not place is a gap. A board pin was never
+    // going to be traced — the label is all there is — so it is a method, noted
+    // once, and it must not count against how much of the drawing was measured.
+    const traceable = inferredPins.filter((p) => anchored.has(p));
+    const fromLabels = inferredPins.filter((p) => !anchored.has(p));
+    if (traceable.length > 0) {
       warnings.push(
-        `${inferredPins.length} of ${trace!.anchors.length} component leads could not be traced to a drawn wire, so ${inferredPins.length === 1 ? 'that connection was' : 'those connections were'} taken from the model instead: ${inferredPins.join(', ')}. Check ${inferredPins.length === 1 ? 'it' : 'them'} in the inspector.`,
+        `${traceable.length} of ${trace!.anchors.length} component leads could not be traced to a drawn wire, so ${traceable.length === 1 ? 'that connection was' : 'those connections were'} taken from the model instead: ${traceable.join(', ')}. Check ${traceable.length === 1 ? 'it' : 'them'} in the inspector.`,
+      );
+    }
+    if (fromLabels.length > 0) {
+      warnings.push(
+        `Which board pin each wire reaches was read from the labels, not traced: ${fromLabels.join(', ')}. Check them against your sketch.`,
       );
     }
     if (reconciled.stillFloating.length > 0) {
@@ -443,8 +464,10 @@ export async function perceive(
   const matchRatio = components.length ? matched / components.length : 0;
   // Confidence tracks the share of leads actually measured rather than inferred,
   // so a reconciled result is honest about the part the model supplied.
+  const anchoredRefs = new Set(trace?.anchors.map((a) => a.ref) ?? []);
+  const gaps = inferredPins.filter((p) => anchoredRefs.has(p)).length;
   const verifiedShare = traceUsable && trace!.anchors.length
-    ? (trace!.anchors.length - inferredPins.length) / trace!.anchors.length
+    ? Math.max(0, (trace!.anchors.length - gaps) / trace!.anchors.length)
     : 0;
   const connectivityConf = traceUsable
     ? Math.min(0.99, 0.55 + 0.44 * verifiedShare)
