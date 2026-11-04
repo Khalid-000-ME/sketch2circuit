@@ -47,43 +47,116 @@ function mapUpstream(status: number, body: string): HttpError {
   return new HttpError(500, 'Something went wrong analysing that. Try again.', `upstream ${status}: ${body.slice(0, 400)}`);
 }
 
-async function post(path: string, body: unknown, opts: MetaRequestOptions = {}): Promise<Response> {
+/**
+ * Issues the request with an abort timer that the caller decides when to release.
+ *
+ * The timer deliberately outlives the `fetch`. A reasoning model answers headers
+ * first and sends the body only once it has finished thinking, so a timeout
+ * cleared on headers protects nothing: a reply that never arrives would hang
+ * forever with the request looking perfectly healthy. One measured at ten
+ * minutes before this.
+ */
+async function post(
+  path: string,
+  body: unknown,
+  opts: MetaRequestOptions = {},
+): Promise<{ res: Response; release: () => void }> {
   const controller = new AbortController();
   // Every caller passes its own ceiling; this is the backstop. It is generous
   // because the Model API's latency has a long tail and a late answer beats none.
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 90_000);
-  if (opts.signal) opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
-  try {
-    const res = await fetch(`${META_BASE_URL}${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw mapUpstream(res.status, await res.text().catch(() => ''));
-    return res;
-  } catch (err) {
-    if (err instanceof HttpError) throw err;
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new HttpError(504, 'That took too long. Try a simpler sketch or a clearer photo.', 'upstream timeout');
-    }
-    throw new HttpError(500, 'Something went wrong analysing that. Try again.', String(err));
-  } finally {
+  const onOuterAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onOuterAbort, { once: true });
+  const release = () => {
     clearTimeout(timeout);
+    opts.signal?.removeEventListener('abort', onOuterAbort);
+  };
+
+  const send = () => fetch(`${META_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  });
+
+  const startedAt = Date.now();
+  try {
+    let res: Response;
+    try {
+      res = await send();
+    } catch (err) {
+      if (controller.signal.aborted || !worthRetrying(err, Date.now() - startedAt)) throw err;
+      console.warn(`[meta] ${path} dropped the connection, retrying once`);
+      res = await send();
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      release();
+      throw mapUpstream(res.status, text);
+    }
+    return { res, release };
+  } catch (err) {
+    release();
+    throw asHttpError(err);
   }
 }
 
-export async function postJson<T>(path: string, body: unknown, opts?: MetaRequestOptions): Promise<T> {
-  const res = await post(path, body, opts);
-  return (await res.json()) as T;
+/**
+ * Whether a failure is worth one more attempt.
+ *
+ * Only transport faults, and only ones that failed fast. The Model API drops
+ * connections under load — ECONNRESET, mid-flight — and a dropped connection
+ * costs nothing to retry. A timeout is the opposite case: it already spent the
+ * full budget, and trying again just spends it twice.
+ */
+function worthRetrying(err: unknown, elapsedMs: number): boolean {
+  if (err instanceof HttpError) return false;
+  if (elapsedMs > RETRY_MAX_ELAPSED_MS) return false;
+  const code = (err as { cause?: { code?: string }; code?: string })?.cause?.code
+    ?? (err as { code?: string })?.code;
+  return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE'
+    || code === 'ETIMEDOUT' || code === 'UND_ERR_SOCKET';
 }
 
-export async function postStream(path: string, body: unknown, opts?: MetaRequestOptions): Promise<Response> {
-  return post(path, { ...(body as object), stream: true }, opts);
+/** A dropped connection is only retried if it dropped quickly. */
+const RETRY_MAX_ELAPSED_MS = 15_000;
+
+function asHttpError(err: unknown): HttpError {
+  if (err instanceof HttpError) return err;
+  if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+    return new HttpError(504, 'That took too long. Try a simpler sketch or a clearer photo.', 'upstream timeout');
+  }
+  return new HttpError(500, 'Something went wrong analysing that. Try again.', String(err));
 }
+
+export async function postJson<T>(path: string, body: unknown, opts?: MetaRequestOptions): Promise<T> {
+  const { res, release } = await post(path, body, opts);
+  try {
+    // Reading the body stays inside the timeout, which is the whole point.
+    return (await res.json()) as T;
+  } catch (err) {
+    throw asHttpError(err);
+  } finally {
+    release();
+  }
+}
+
+/**
+ * The timer stays armed after this returns, because the body has not been read
+ * yet. `sseEvents` releases it when the stream ends, and applies its own idle
+ * and total limits while it runs.
+ */
+export async function postStream(path: string, body: unknown, opts?: MetaRequestOptions): Promise<Response> {
+  const { res, release } = await post(path, { ...(body as object), stream: true }, opts);
+  streamReleases.set(res, release);
+  return res;
+}
+
+/** Releases for in-flight streams, keyed by the response they belong to. */
+const streamReleases = new WeakMap<Response, () => void>();
 
 /** No chunk for this long means the stream has stalled. */
 const STREAM_IDLE_MS = 30_000;
@@ -147,5 +220,7 @@ export async function* sseEvents(res: Response): AsyncGenerator<{ type: string }
     }
   } finally {
     reader.releaseLock();
+    streamReleases.get(res)?.();
+    streamReleases.delete(res);
   }
 }
