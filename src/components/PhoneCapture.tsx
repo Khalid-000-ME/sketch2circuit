@@ -17,6 +17,9 @@ export default function PhoneCapture({ token }: { token: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [preview, setPreview] = useState<string | null>(null);
+  // A link closes as soon as the computer collects the photo, so "ended" after a
+  // successful send means it arrived — the opposite of what it means before one.
+  const [sentOnce, setSentOnce] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const send = async (file: File) => {
@@ -38,6 +41,7 @@ export default function PhoneCapture({ token }: { token: string }) {
         setPhase('failed');
         return;
       }
+      setSentOnce(true);
       setPhase('sent');
     } catch {
       setMessage('That did not send. Check your connection and try again.');
@@ -55,9 +59,13 @@ export default function PhoneCapture({ token }: { token: string }) {
 
         {phase === 'ended' ? (
           <div className="my-auto">
-            <h1 className="text-2xl font-semibold leading-tight">This session has ended</h1>
+            <h1 className="text-2xl font-semibold leading-tight">
+              {sentOnce ? 'Your photo is already there' : 'This session has ended'}
+            </h1>
             <p className="mt-3 text-[15px] leading-relaxed text-dim">
-              Scan the code on your computer again.
+              {sentOnce
+                ? 'Your computer picked it up, which closes the link. To send another, start a new sketch there and scan the new code.'
+                : 'Scan the code on your computer again.'}
             </p>
           </div>
         ) : (

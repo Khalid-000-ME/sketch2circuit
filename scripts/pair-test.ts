@@ -23,6 +23,14 @@ async function main() {
   const desktop = await browser.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 2 });
   desktop.on('pageerror', (e) => errors.push(`desktop: ${e.message}`));
 
+  // A real network is slower than loopback. Collecting the photo is delayed, which
+  // is what exposed a race where the desktop dropped a photo it had just fetched.
+  const delay = Number(process.env.IMAGE_DELAY_MS ?? 900);
+  await desktop.route('**/api/pair/*/image', async (route) => {
+    await new Promise((r) => setTimeout(r, delay));
+    await route.continue();
+  });
+
   await desktop.goto(BASE, { waitUntil: 'networkidle' });
   await desktop.getByRole('button', { name: 'Show QR code' }).click();
   await desktop.waitForSelector('[aria-label^="QR code"] svg', { timeout: 10_000 });
@@ -55,12 +63,33 @@ async function main() {
   await phone.waitForTimeout(600); // let the button finish its colour transition
   await phone.screenshot({ path: `${OUT}/p3-phone-sent.png` });
   console.log('phone: sent');
+  // Measured from the send, not from the end of the check below it.
+  const t0 = Date.now();
+  // The phone must still say so, not that the session ended.
+  await phone.waitForTimeout(2500);
+  if (await phone.getByText('This session has ended').count()) errors.push('phone switched to "This session has ended" after sending');
 
   // The desktop should notice within a couple of polls and begin analysing.
-  const t0 = Date.now();
-  await desktop.waitForSelector('text=/Reading the page|Photo received/', { timeout: 15_000 });
-  console.log(`desktop picked it up and started analysing in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  // Analysis has to actually start. "Photo received" on its own is the stuck state.
+  try {
+    await desktop.waitForSelector('text=/Reading the page|Finding|Tracing|Building|Solving/', { timeout: 20_000 });
+    console.log(`desktop picked it up and started analysing within ${((Date.now() - t0) / 1000).toFixed(1)}s of the send (an upper bound: the check above waits first)`);
+  } catch {
+    const stuck = await desktop.getByText('Photo received').count();
+    errors.push(stuck ? 'desktop stuck on "Photo received": the photo was dropped and nothing was analysed' : 'analysis never started');
+  }
   await desktop.screenshot({ path: `${OUT}/p4-desktop-analysing.png` });
+
+  // Sending again from the same code: the link closed when the computer took the
+  // photo, so the phone must say it arrived rather than that the session died.
+  await phone.locator('input[type=file]').setInputFiles(PHOTO);
+  await phone.waitForSelector('text=/Your photo is already there|This session has ended/', { timeout: 20_000 });
+  if (await phone.getByText('This session has ended').count()) {
+    errors.push('phone says the session has ended, though its photo was collected');
+  } else {
+    console.log('phone, on sending again: says the photo already arrived');
+  }
+  await phone.screenshot({ path: `${OUT}/p5-phone-again.png` });
 
   console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no page errors');
   await browser.close();

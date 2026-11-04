@@ -1,19 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface Props {
   /** Called once with the photo when it arrives from the phone. */
   onImage: (blob: Blob) => void;
 }
 
-type State =
-  | { kind: 'idle' }
-  | { kind: 'creating' }
-  | { kind: 'waiting'; token: string; url: string; svg: string; reachable: boolean }
-  | { kind: 'receiving' }
-  | { kind: 'expired' }
-  | { kind: 'error'; message: string };
+interface Session {
+  token: string;
+  url: string;
+  svg: string;
+  reachable: boolean;
+}
+
+type Phase = 'idle' | 'creating' | 'waiting' | 'receiving' | 'expired' | 'error';
 
 const POLL_MS = 1200;
 
@@ -23,33 +24,63 @@ const POLL_MS = 1200;
  * Polling is a deliberate choice over a held-open connection. The wait is a few
  * seconds to a few minutes, each poll is a few bytes, and it behaves the same
  * behind any proxy or tunnel, which is where this will be demonstrated.
+ *
+ * The session and the phase are separate pieces of state on purpose. They used to
+ * be one, so announcing "Photo received" changed the value the polling effect
+ * depended on: React tore the effect down mid-collection, its cleanup set the
+ * cancelled flag, and the fetch that was already in flight returned to a guard
+ * that threw the photo away. The server had handed the image over and deleted it
+ * by then, so the screen sat on "Photo received" for ever and the phone was told
+ * the session had ended. The effect now depends on the token alone.
  */
 export default function PhonePair({ onImage }: Props) {
-  const [state, setState] = useState<State>({ kind: 'idle' });
+  const [session, setSession] = useState<Session | null>(null);
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [message, setMessage] = useState<string | null>(null);
   const onImageRef = useRef(onImage);
   useEffect(() => { onImageRef.current = onImage; });
 
-  const token = state.kind === 'waiting' ? state.token : null;
+  // A poll that takes longer than the interval would otherwise start a second
+  // collection, and the second one finds the session already emptied.
+  const collecting = useRef(false);
+  const token = session?.token ?? null;
 
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
+    collecting.current = false;
 
     const tick = async () => {
+      if (cancelled || collecting.current) return;
       try {
         const res = await fetch(`/api/pair/${token}`, { cache: 'no-store' });
-        if (cancelled) return;
+        if (cancelled || collecting.current) return;
         const body = (await res.json()) as { status: 'waiting' | 'ready' | 'expired' };
-        if (body.status === 'expired') { setState({ kind: 'expired' }); return; }
+        if (body.status === 'expired') { setPhase('expired'); setSession(null); return; }
         if (body.status !== 'ready') return;
 
-        setState({ kind: 'receiving' });
+        collecting.current = true;
+        setPhase('receiving');
         const image = await fetch(`/api/pair/${token}/image`, { cache: 'no-store' });
-        if (cancelled) return;
-        if (!image.ok) { setState({ kind: 'error', message: 'The photo could not be collected. Try again.' }); return; }
+        if (!image.ok) {
+          collecting.current = false;
+          setMessage('The photo could not be collected. Try again.');
+          setPhase('error');
+          setSession(null);
+          return;
+        }
+        // Collecting empties the mailbox on the server, so these bytes are the
+        // only copy: hand them over whatever else has happened meanwhile.
         onImageRef.current(await image.blob());
       } catch {
-        // A failed poll is not a failed session; the next one decides.
+        // A failed poll is not a failed session; the next one decides. A failure
+        // while collecting is fatal to this session, since the photo is gone.
+        if (collecting.current) {
+          collecting.current = false;
+          setMessage('The photo could not be collected. Scan the code again.');
+          setPhase('error');
+          setSession(null);
+        }
       }
     };
 
@@ -57,8 +88,9 @@ export default function PhonePair({ onImage }: Props) {
     return () => { cancelled = true; clearInterval(timer); };
   }, [token]);
 
-  const open = async () => {
-    setState({ kind: 'creating' });
+  const open = useCallback(async () => {
+    setPhase('creating');
+    setMessage(null);
     try {
       const res = await fetch('/api/pair', { method: 'POST' });
       if (!res.ok) throw new Error(String(res.status));
@@ -71,39 +103,41 @@ export default function PhonePair({ onImage }: Props) {
         type: 'svg', margin: 2, errorCorrectionLevel: 'M',
         color: { dark: '#07090d', light: '#ffffff' },
       });
-      setState({ kind: 'waiting', token: body.token, url: body.url, svg, reachable: body.reachable });
+      setSession({ token: body.token, url: body.url, svg, reachable: body.reachable });
+      setPhase('waiting');
     } catch {
-      setState({ kind: 'error', message: 'Could not start a phone session. Try again.' });
+      setMessage('Could not start a phone session. Try again.');
+      setPhase('error');
     }
-  };
+  }, []);
 
-  if (state.kind === 'idle' || state.kind === 'creating' || state.kind === 'expired' || state.kind === 'error') {
+  if (phase === 'receiving') {
+    return (
+      <div className="mt-4 rounded-xl border border-ok/40 bg-ok/[0.06] px-5 py-4" role="status">
+        <p className="text-[14px] text-ok">Photo received</p>
+      </div>
+    );
+  }
+
+  if (phase !== 'waiting' || !session) {
     return (
       <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-edge bg-raised px-5 py-4">
         <div className="min-w-0 flex-1">
           <p className="text-[14px] text-ink">Use your phone</p>
           <p className="mt-0.5 text-[12px] text-faint">
-            {state.kind === 'expired' ? 'That code expired.'
-              : state.kind === 'error' ? state.message
+            {phase === 'expired' ? 'That code expired.'
+              : phase === 'error' ? message
               : 'Scan a code, photograph the circuit, and it appears here.'}
           </p>
         </div>
         <button
           type="button"
           onClick={open}
-          disabled={state.kind === 'creating'}
+          disabled={phase === 'creating'}
           className="h-11 shrink-0 rounded-md border border-edge-strong px-4 text-[14px] text-ink transition hover:border-accent/50 hover:bg-white/[0.03] disabled:opacity-50"
         >
-          {state.kind === 'creating' ? 'Starting…' : state.kind === 'idle' ? 'Show QR code' : 'New QR code'}
+          {phase === 'creating' ? 'Starting…' : phase === 'idle' ? 'Show QR code' : 'New QR code'}
         </button>
-      </div>
-    );
-  }
-
-  if (state.kind === 'receiving') {
-    return (
-      <div className="mt-4 rounded-xl border border-ok/40 bg-ok/[0.06] px-5 py-4" role="status">
-        <p className="text-[14px] text-ok">Photo received</p>
       </div>
     );
   }
@@ -114,7 +148,7 @@ export default function PhonePair({ onImage }: Props) {
         className="h-44 w-44 shrink-0 overflow-hidden rounded-lg bg-white [&>svg]:h-full [&>svg]:w-full"
         role="img"
         aria-label="QR code. Scan it with your phone's camera."
-        dangerouslySetInnerHTML={{ __html: state.svg }}
+        dangerouslySetInnerHTML={{ __html: session.svg }}
       />
       <div className="min-w-0 flex-1" style={{ minWidth: '12rem' }}>
         <p className="text-[14px] text-ink">Scan with your phone</p>
@@ -125,8 +159,8 @@ export default function PhonePair({ onImage }: Props) {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
           Waiting for your photo
         </p>
-        <p className="mt-3 break-all font-mono text-[11px] text-faint">{state.url}</p>
-        {!state.reachable && (
+        <p className="mt-3 break-all font-mono text-[11px] text-faint">{session.url}</p>
+        {!session.reachable && (
           <p className="mt-3 rounded border border-warn/40 bg-warn/[0.08] px-3 py-2 text-[12px] leading-relaxed text-warn">
             This address only works on this computer. Open the app by its network address,
             or set PUBLIC_ORIGIN.
@@ -134,7 +168,7 @@ export default function PhonePair({ onImage }: Props) {
         )}
         <button
           type="button"
-          onClick={() => setState({ kind: 'idle' })}
+          onClick={() => { setSession(null); setPhase('idle'); }}
           className="mt-3 text-[12px] text-faint underline underline-offset-4 transition hover:text-dim"
         >
           Cancel
