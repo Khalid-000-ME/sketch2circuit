@@ -10,6 +10,7 @@
 import type { CircuitComponent, CircuitGraph, Finding, Simulation } from '../types';
 import { defaultValue, valueAssumed } from './solve';
 import { fmtA, fmtV, fmtW, formatValue, LED_VF, parseValue } from './units';
+import { BOARDS, isBoardType } from './boards';
 
 /** Typical through-hole ratings we judge against. */
 const LED_MAX_MA = 20;
@@ -98,8 +99,18 @@ export function runRules(graph: CircuitGraph, sim: Simulation, floating: string[
   const res = (id: string) => ctx.sim.component_results[id];
   const solved = sim.status === 'ok';
 
+  // The highest voltage anything in this circuit is supplying: a battery's EMF, or
+  // the level a board is driving a pin to.
+  const boardLevels = Object.keys(sim.pin_currents ?? {}).map((ref) => {
+    const [id, pin] = [ref.slice(0, ref.lastIndexOf('.')), ref.slice(ref.lastIndexOf('.') + 1)];
+    const board = byId.get(id);
+    if (!board || !isBoardType(board.type)) return 0;
+    const spec = BOARDS[board.type];
+    return spec.power[pin]?.volts ?? spec.logicV;
+  });
   const supplyV = Math.max(
     ...graph.components.filter((c) => c.type === 'battery').map((c) => defaultValue(c) ?? 0),
+    ...boardLevels,
     0,
   );
 
@@ -111,16 +122,24 @@ export function runRules(graph: CircuitGraph, sim: Simulation, floating: string[
     const r = res(led.id);
     const measured = r && solved ? Math.abs(r.current_a) : null;
     const vf = LED_VF[(led.value ?? 'red').toLowerCase()] ?? 2.0;
-    // Without a resistor the only limit is the supply's internal resistance.
-    const estimate = measured && measured > 0.001 ? measured : Math.max((supplyV - vf) / 0.05, 0);
+    // Without a resistor the only limit is the supply's internal resistance. When
+    // the circuit solved, the solved current is the answer, even a small one: an
+    // LED on a pin that is not being driven draws nothing, and an estimate made
+    // from the supply voltage would call that a fault.
+    const estimate = measured != null ? measured : Math.max((supplyV - vf) / 0.05, 0);
     if (estimate < LED_MAX_MA / 1000 * 1.2) continue;
     const times = Math.round(estimate / (LED_MAX_MA / 1000));
     const suggested = supplyV > vf ? nearestStandard((supplyV - vf) / 0.018) : 330;
+    // "About 1x its rating" is not a sentence anyone should read. Barely over the
+    // limit is a different warning from twenty times over it.
+    const consequence = times >= 2
+      ? `about ${times}× its ${LED_MAX_MA}mA rating — and fail within seconds`
+      : `over its ${LED_MAX_MA}mA rating — so it will run too hot and wear out quickly`;
     add({
       severity: 'error',
       component_id: led.id,
       rule: 'led_no_current_limit',
-      message: `${led.id} has no current-limiting resistor. At ${supplyV ? `${supplyV}V` : 'this supply voltage'} it will draw roughly ${fmtA(estimate)} — about ${times}× its ${LED_MAX_MA}mA rating — and fail within seconds.`,
+      message: `${led.id} has no current-limiting resistor. At ${supplyV ? `${supplyV}V` : 'this supply voltage'} it will draw roughly ${fmtA(estimate)} — ${consequence}.`,
       fix: `Add a ${formatValue(suggested, 'Ω')} resistor in series with ${led.id}.`,
     });
   }
@@ -204,6 +223,96 @@ export function runRules(graph: CircuitGraph, sim: Simulation, floating: string[
           : `${label(c)} dissipates ${fmtW(r.power_w)}, which is close to the ${RESISTOR_RATING_W}W rating of a standard through-hole resistor. It will get noticeably warm.`,
         fix: `Use a ${bigger} resistor, or raise the resistance to ${formatValue(nearestStandard(rv * (r.power_w / (RESISTOR_RATING_W * 0.4))), 'Ω')} to cut the current.`,
       });
+    }
+  }
+
+
+  // ── Boards: Arduino and Raspberry Pi ─────────────────────────────────────────
+  for (const board of graph.components.filter((c) => isBoardType(c.type))) {
+    if (!isBoardType(board.type)) continue;
+    const spec = BOARDS[board.type];
+    const netSize = (pin: string) => graph.nets.find((n) => n.id === netOf.get(`${board.id}.${pin}`))?.pins.length ?? 0;
+    const wired = board.pins.filter((p) => netSize(p) > 1);
+    if (wired.length === 0) continue;
+
+    // No return path means nothing wired to the board can carry current.
+    if (!wired.includes('GND')) {
+      add({
+        severity: 'error',
+        component_id: board.id,
+        rule: 'board_gnd_missing',
+        message: `${board.id}'s GND pin is not connected to anything, so no current has a way back to it. Nothing wired to ${board.id} will work.`,
+        fix: `Connect ${board.id}'s GND pin to the other end of the circuit — the LED's cathode, or the negative side of the supply.`,
+      });
+    }
+
+    if (solved) {
+      for (const pin of spec.gpio) {
+        if (netSize(pin) < 2) continue;
+        const ref = `${board.id}.${pin}`;
+        const amps = Math.abs(sim.pin_currents?.[ref] ?? 0);
+        const net = graph.nets.find((n) => n.id === netOf.get(ref));
+        const loads = (net?.pins ?? []).map((p) => byId.get(p.slice(0, p.lastIndexOf('.')))).filter((c) => c && c.id !== board.id);
+        const led = loads.find((c) => c?.type === 'led');
+
+        if (amps > spec.gpioWarnA) {
+          const fatal = amps > spec.gpioMaxA;
+          const vf = LED_VF[(led?.value ?? 'red').toLowerCase()] ?? 2.0;
+          add({
+            severity: fatal ? 'error' : 'warning',
+            component_id: board.id,
+            rule: 'gpio_overcurrent',
+            message: `${board.id}'s ${pin} pin is delivering ${fmtA(amps)}. ${spec.limitNote} ${fatal ? 'Beyond that it can permanently damage the pin or the whole chip.' : 'It will work, but it is being pushed.'}`,
+            fix: led
+              ? `Put a resistor of about ${formatValue(nearestStandard((spec.logicV - vf) / 0.01), 'Ω')} in series with ${led.id}, which holds it near 10mA.`
+              : `Limit the current with a series resistor, or drive the load through a transistor instead of straight from the pin.`,
+          });
+        }
+
+        // Voltage at the pin: a Pi pin tolerates 3.6V, and 5V from anywhere kills it.
+        const volts = net ? sim.node_voltages[net.id] : undefined;
+        if (volts != null && volts > spec.gpioMaxV + 0.15) {
+          add({
+            severity: 'error',
+            component_id: board.id,
+            rule: 'gpio_voltage_exceeded',
+            message: board.type === 'raspberry_pi'
+              ? `${board.id}'s ${pin} pin sits at ${fmtV(volts)}. Raspberry Pi pins are 3.3V logic and are not 5V tolerant, so this can permanently damage the processor.`
+              : `${board.id}'s ${pin} pin sits at ${fmtV(volts)}, above the ${spec.gpioMaxV}V an ${spec.name} pin tolerates.`,
+            fix: board.type === 'raspberry_pi'
+              ? `Bring the signal down to 3.3V with a voltage divider (two resistors) or a level shifter before it reaches ${pin}.`
+              : `Keep whatever drives ${pin} at or below ${spec.logicV}V.`,
+          });
+        }
+      }
+
+      for (const [pin, p] of Object.entries(spec.power)) {
+        const amps = Math.abs(sim.pin_currents?.[`${board.id}.${pin}`] ?? 0);
+        if (amps > p.maxA) {
+          add({
+            severity: 'error',
+            component_id: board.id,
+            rule: 'power_rail_overload',
+            message: `${board.id}'s ${pin} pin is being asked for ${fmtA(amps)}, but it can supply only about ${fmtA(p.maxA)}. The board will brown out or something on it will fail.`,
+            fix: `Power that part from its own supply, and join that supply's ground to ${board.id}'s GND.`,
+          });
+        }
+      }
+
+      // The assumption behind every number above, stated rather than buried.
+      const assumed = spec.gpio.filter(
+        (pin) => board.pin_states?.[pin] == null && `${board.id}.${pin}` in (sim.pin_currents ?? {}),
+      );
+      if (assumed.length) {
+        const list = assumed.join(', ');
+        add({
+          severity: 'info',
+          component_id: board.id,
+          rule: 'pin_state_assumed',
+          message: `${list} ${assumed.length > 1 ? 'are' : 'is'} assumed to be driven HIGH. A sketch cannot show what the firmware does, and HIGH is the case that is hardest on whatever is wired to the pin.`,
+          fix: `Select ${board.id} and set ${assumed.length > 1 ? 'each pin' : 'the pin'} to HIGH, LOW or INPUT to match your code.`,
+        });
+      }
     }
   }
 

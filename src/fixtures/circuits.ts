@@ -124,7 +124,59 @@ export const MOTOR_DRIVER: CircuitGraph = {
   ],
 };
 
+/** An Arduino blinking an LED the correct way: D13 through 220 ohms. */
+export const ARDUINO_BLINK_OK: CircuitGraph = {
+  components: [
+    c('U1', 'arduino_uno'),
+    c('R1', 'resistor', '220', 'ohm'),
+    c('D1', 'led', 'red'),
+  ],
+  nets: [
+    n('N1', ['U1.D13', 'R1.a']),
+    n('N2', ['R1.b', 'D1.anode']),
+    n('N3', ['D1.cathode', 'U1.GND'], true),
+  ],
+};
+
+/** The classic mistake: an LED straight onto an Arduino pin. */
+export const ARDUINO_LED_DIRECT: CircuitGraph = {
+  components: [c('U1', 'arduino_uno'), c('D1', 'led', 'red')],
+  nets: [
+    n('N1', ['U1.D13', 'D1.anode']),
+    n('N2', ['D1.cathode', 'U1.GND'], true),
+  ],
+};
+
+/** The same mistake on a Raspberry Pi, where the pin is weaker. */
+export const PI_LED_DIRECT: CircuitGraph = {
+  components: [c('RPI1', 'raspberry_pi'), c('D1', 'led', 'red')],
+  nets: [
+    n('N1', ['RPI1.GPIO17', 'D1.anode']),
+    n('N2', ['D1.cathode', 'RPI1.GND'], true),
+  ],
+};
+
+/** A Pi pin driven correctly, through 330 ohms. */
+export const PI_LED_OK: CircuitGraph = {
+  components: [c('RPI1', 'raspberry_pi'), c('R1', 'resistor', '330', 'ohm'), c('D1', 'led', 'green')],
+  nets: [
+    n('N1', ['RPI1.GPIO17', 'R1.a']),
+    n('N2', ['R1.b', 'D1.anode']),
+    n('N3', ['D1.cathode', 'RPI1.GND'], true),
+  ],
+};
+
+/** Arduino's 5V output wired into a Pi GPIO: the Pi's pin is not 5V tolerant. */
+export const ARDUINO_TO_PI_5V: CircuitGraph = {
+  components: [c('U1', 'arduino_uno'), c('RPI1', 'raspberry_pi')],
+  nets: [
+    n('N1', ['U1.D13', 'RPI1.GPIO17']),
+    n('N2', ['U1.GND', 'RPI1.GND'], true),
+  ],
+};
+
 export const ALL_FIXTURES = {
   SERIES_OK, LED_NO_RESISTOR, RESISTOR_OVER_POWER, PARALLEL_SWITCH,
   ELECTROLYTIC_REVERSED, SUPPLY_SHORT, FLOATING_BRANCH, MOTOR_DRIVER,
+  ARDUINO_BLINK_OK, ARDUINO_LED_DIRECT, PI_LED_DIRECT, PI_LED_OK, ARDUINO_TO_PI_5V,
 };

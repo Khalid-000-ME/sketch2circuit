@@ -8,6 +8,7 @@
  */
 
 import { PINS, type CircuitComponent, type CircuitGraph, type ComponentType, type Net } from '../types';
+import { isBoardType, normaliseBoardPin } from './boards';
 
 class UnionFind {
   private parent = new Map<string, string>();
@@ -50,6 +51,11 @@ export function normaliseType(raw: string | null | undefined): ComponentType {
     node: 'junction', wire: 'junction', connection: 'junction', dot: 'junction',
     header_pins: 'header', pin_header: 'header',
     oscillator: 'crystal', xtal: 'crystal',
+    arduino: 'arduino_uno', uno: 'arduino_uno', arduino_board: 'arduino_uno', arduino_nano: 'arduino_uno',
+    microcontroller: 'arduino_uno', mcu: 'arduino_uno', atmega328: 'arduino_uno', atmega328p: 'arduino_uno',
+    raspberry: 'raspberry_pi', rpi: 'raspberry_pi', pi: 'raspberry_pi', raspi: 'raspberry_pi',
+    raspberrypi: 'raspberry_pi', raspberry_pi_4: 'raspberry_pi', raspberry_pi_3: 'raspberry_pi',
+    single_board_computer: 'raspberry_pi', sbc: 'raspberry_pi',
   };
   if (KNOWN_TYPES.has(t as ComponentType)) return t as ComponentType;
   return alias[t] ?? 'unknown';
@@ -95,7 +101,7 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
     { resistor: 'R', led: 'D', diode: 'D', battery: 'B', ground: 'GND', capacitor: 'C',
       capacitor_electrolytic: 'C', switch: 'SW', potentiometer: 'RV', transistor: 'Q',
       ic: 'U', inductor: 'L', crystal: 'X', header: 'J', buzzer: 'LS', motor: 'M',
-      junction: 'N', unknown: 'X' } as Record<ComponentType, string>
+      arduino_uno: 'UNO', raspberry_pi: 'RPI', junction: 'N', unknown: 'X' } as Record<ComponentType, string>
   )[t];
 
   // 1. Normalise components: type, id uniqueness, pin set.
@@ -117,6 +123,11 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
     }
     seenIds.add(id);
     const pins = [...PINS[type]];
+    const pin_states = isBoardType(type) && raw.pin_states
+      ? Object.fromEntries(
+          Object.entries(raw.pin_states).filter(([pin, st]) => pins.includes(pin) && ['high', 'low', 'input'].includes(st)),
+        )
+      : undefined;
     components.push({
       ...raw,
       id,
@@ -124,10 +135,12 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
       pins,
       value: raw.value == null || raw.value === '' ? null : String(raw.value),
       confidence: Number.isFinite(raw.confidence) ? Math.max(0, Math.min(1, raw.confidence)) : 0.5,
+      ...(pin_states && Object.keys(pin_states).length ? { pin_states } : { pin_states: undefined }),
     });
   }
 
   const byId = new Map(components.map((c) => [c.id, c]));
+  const unknownBoardPins: string[] = [];
   const resolvePin = (ref: string): string | null => {
     const dot = String(ref).lastIndexOf('.');
     const rawId = dot < 0 ? String(ref) : String(ref).slice(0, dot);
@@ -135,6 +148,16 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
     const id = byId.has(rawId) ? rawId : idMap.get(rawId);
     if (!id || !byId.has(id)) return null;
     const c = byId.get(id)!;
+    if (isBoardType(c.type)) {
+      // A board's pins are not interchangeable, so an unrecognised one is dropped
+      // and reported rather than quietly wired to something else.
+      const pin = normaliseBoardPin(c.type, rawPin);
+      if (!pin || !c.pins.includes(pin)) {
+        unknownBoardPins.push(`${id}.${rawPin || '?'}`);
+        return null;
+      }
+      return `${id}.${pin}`;
+    }
     return `${id}.${normalisePin(c.type, rawPin || c.pins[0])}`;
   };
 
@@ -160,6 +183,12 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
     if (net.confidence != null) netConf.set(key, net.confidence);
     uf.find(key);
   }
+  for (const ref of [...new Set(unknownBoardPins)]) {
+    const [id, pin] = [ref.slice(0, ref.lastIndexOf('.')), ref.slice(ref.lastIndexOf('.') + 1)];
+    warnings.push(`${id} has no pin called "${pin}", so that connection was dropped.`);
+  }
+  // Board pins that did not resolve are not "components that were not detected".
+  dropped = Math.max(0, dropped - unknownBoardPins.length);
   if (dropped > 0) warnings.push(`${dropped} connection reference${dropped === 1 ? '' : 's'} named a component that was not detected and ${dropped === 1 ? 'was' : 'were'} dropped.`);
 
   // A pin shared between two nets means they are the same node.
@@ -213,7 +242,7 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
   const connected = new Set(nets.flatMap((n) => n.pins));
   const floating: string[] = [];
   for (const c of components) {
-    if (c.type === 'junction' || c.type === 'ic' || c.type === 'header') continue;
+    if (c.type === 'junction' || c.type === 'ic' || c.type === 'header' || isBoardType(c.type)) continue;
     for (const pin of c.pins) {
       const ref = `${c.id}.${pin}`;
       if (!connected.has(ref)) floating.push(ref);

@@ -1,5 +1,8 @@
 /** Core domain types. Shared by the vision pipeline, the solver and the renderer. */
 
+import { ARDUINO_UNO_PINS, RASPBERRY_PI_PINS, type PinState } from './circuit/boards';
+export type { PinState } from './circuit/boards';
+
 export type ComponentType =
   // Tier 1
   | 'resistor' | 'led' | 'battery' | 'ground' | 'junction'
@@ -7,6 +10,8 @@ export type ComponentType =
   | 'capacitor' | 'capacitor_electrolytic' | 'switch' | 'diode' | 'potentiometer'
   // Tier 3
   | 'transistor' | 'ic' | 'inductor' | 'crystal' | 'header' | 'buzzer' | 'motor'
+  // Boards
+  | 'arduino_uno' | 'raspberry_pi'
   | 'unknown';
 
 export const PINS: Record<ComponentType, readonly string[]> = {
@@ -27,6 +32,8 @@ export const PINS: Record<ComponentType, readonly string[]> = {
   header: ['1', '2'],
   buzzer: ['pos', 'neg'],
   motor: ['a', 'b'],
+  arduino_uno: [...ARDUINO_UNO_PINS],
+  raspberry_pi: [...RASPBERRY_PI_PINS],
   unknown: ['a', 'b'],
 };
 
@@ -49,6 +56,11 @@ export interface CircuitComponent {
   pins: string[];
   /** Set when the user corrected or edited this component in the inspector. */
   user_edited?: boolean;
+  /**
+   * What each GPIO pin of a board is doing. A sketch cannot show this: it is a
+   * property of the firmware. Absent means assumed, and the assumption is stated.
+   */
+  pin_states?: Record<string, PinState>;
 }
 
 export interface Net {
@@ -74,6 +86,8 @@ export interface Simulation {
   /** Present when status !== 'ok'. */
   reason?: string;
   iterations?: number;
+  /** Current each driven board pin delivers, keyed "U1.D13", amps. Positive is sourcing. */
+  pin_currents?: Record<string, number>;
 }
 
 export type Severity = 'error' | 'warning' | 'info';

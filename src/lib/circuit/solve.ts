@@ -9,6 +9,7 @@
 
 import type { CircuitComponent, CircuitGraph, ComponentResult, Net, Simulation } from '../types';
 import { LED_VF, parseValue } from './units';
+import { BOARDS, isBoardType, type PinState } from './boards';
 
 /** Conductance added from every node to ground so floating sub-graphs stay solvable. */
 const GMIN = 1e-9;
@@ -133,12 +134,18 @@ export function buildTopology(graph: CircuitGraph): Topology {
   const pinNode = new Map<string, number>();
 
   // Ground preference: an explicit ground net, then a net touching a ground
-  // symbol, then the battery's negative terminal.
+  // symbol, then a board's GND pin, then the battery's negative terminal.
   const groundSymbols = new Set(
     graph.components.filter((c) => c.type === 'ground').map((c) => `${c.id}.gnd`),
   );
   let groundNet: Net | undefined = graph.nets.find((n) => n.is_ground);
   groundNet ??= graph.nets.find((n) => n.pins.some((p) => groundSymbols.has(p)));
+  if (!groundNet) {
+    for (const b of graph.components.filter((c) => isBoardType(c.type))) {
+      const n = graph.nets.find((net) => net.pins.includes(`${b.id}.GND`) && net.pins.length > 1);
+      if (n) { groundNet = n; break; }
+    }
+  }
   if (!groundNet) {
     const batteries = graph.components.filter((c) => c.type === 'battery');
     for (const b of batteries) {
@@ -162,6 +169,60 @@ export function buildTopology(graph: CircuitGraph): Topology {
 
 interface Branch { comp: CircuitComponent; index: number }
 
+/** A board pin as a voltage `emf` behind `r` ohms, between two nodes. */
+interface NortonSource { id: string; pin: string; np: number; nn: number; emf: number; r: number }
+
+/**
+ * What a board is doing, expressed as sources.
+ *
+ * Supply pins are always on. A GPIO is driven according to its state, and where
+ * nothing says what that is the assumption is HIGH: it is the state in which an
+ * LED hung on a pin or a load that is too heavy does damage, which is the
+ * question the person is asking. The exception is a pin that shares its net with
+ * a pin of another board — two outputs fighting over a wire is not a design, it
+ * is a mistake in how this was read, so every board after the first listens.
+ *
+ * A board whose GND is not connected delivers nothing, since a source with no
+ * return path has no current to give.
+ */
+export function boardSources(graph: CircuitGraph, node: (pin: string) => number): NortonSource[] {
+  const out: NortonSource[] = [];
+  const boards = graph.components.filter((c) => isBoardType(c.type));
+  const netOfPin = new Map<string, Net>();
+  for (const net of graph.nets) for (const pin of net.pins) netOfPin.set(pin, net);
+
+  boards.forEach((board, order) => {
+    if (!isBoardType(board.type)) return;
+    const spec = BOARDS[board.type];
+    const nn = node(`${board.id}.GND`);
+    if (nn < 0) return;
+
+    for (const [pin, p] of Object.entries(spec.power)) {
+      const np = node(`${board.id}.${pin}`);
+      if (np >= 0 && (netOfPin.get(`${board.id}.${pin}`)?.pins.length ?? 0) > 1) {
+        out.push({ id: board.id, pin, np, nn, emf: p.volts, r: p.rint });
+      }
+    }
+
+    for (const pin of spec.gpio) {
+      const ref = `${board.id}.${pin}`;
+      const net = netOfPin.get(ref);
+      const np = node(ref);
+      if (np < 0 || !net || net.pins.length < 2) continue;
+
+      const sharesWithEarlierBoard = net.pins.some((other) => {
+        const owner = other.slice(0, other.lastIndexOf('.'));
+        const at = boards.findIndex((b) => b.id === owner);
+        return owner !== board.id && at >= 0 && at < order;
+      });
+      const state: PinState = board.pin_states?.[pin] ?? (sharesWithEarlierBoard ? 'input' : 'high');
+      if (state === 'input') continue;
+      out.push({ id: board.id, pin, np, nn, emf: state === 'high' ? spec.logicV : 0, r: spec.gpioRout });
+    }
+  });
+  return out;
+}
+
 export function solveDC(graph: CircuitGraph): Simulation {
   const empty: Simulation = { status: 'unsimulatable', node_voltages: {}, component_results: {}, reason: '' };
   if (graph.nets.length === 0) return { ...empty, reason: 'No connections were recovered, so there is nothing to solve.' };
@@ -169,12 +230,14 @@ export function solveDC(graph: CircuitGraph): Simulation {
   const topo = buildTopology(graph);
   const comps = graph.components;
   const sources = comps.filter((c) => c.type === 'battery');
-  if (sources.length === 0) {
-    return { ...empty, status: 'no_source', reason: 'No power source was found, so every node sits at 0V.' };
-  }
 
   const node = (pin: string): number => topo.pinNode.get(pin) ?? -1;
   const nd = (n: number) => n;
+
+  const nortons = boardSources(graph, node);
+  if (sources.length === 0 && nortons.length === 0) {
+    return { ...empty, status: 'no_source', reason: 'No power source was found, so every node sits at 0V.' };
+  }
 
   const nonlinear = comps.filter((c) => c.type === 'led' || c.type === 'diode');
 
@@ -229,6 +292,15 @@ export function solveDC(graph: CircuitGraph): Simulation {
 
     // gmin to ground everywhere: keeps the matrix non-singular when a branch floats.
     for (let n = 1; n <= nNodes; n++) stampG(n, 0, GMIN);
+
+    // A board pin is a voltage behind a resistance. As a Norton equivalent — a
+    // conductance with a current source across it — it needs no extra unknown, so
+    // it drops into the same matrix as everything else.
+    for (const src of nortons) {
+      const g = 1 / src.r;
+      stampG(src.np, src.nn, g);
+      stampI(src.nn, src.np, src.emf * g);
+    }
 
     for (const c of comps) {
       const val = defaultValue(c);
@@ -335,7 +407,28 @@ export function solveDC(graph: CircuitGraph): Simulation {
     component_results[id] = { current_a: i, voltage_v: vv, power_w: Math.abs(i * vv) };
   };
 
+  // What each board pin is actually delivering, now the voltages are known.
+  const pin_currents: Record<string, number> = {};
+  for (const src of nortons) {
+    const dv = nodeV(src.np) - nodeV(src.nn);
+    pin_currents[`${src.id}.${src.pin}`] = (src.emf - dv) / src.r;
+  }
   for (const c of comps) {
+    if (!isBoardType(c.type)) continue;
+    const power = Object.keys(BOARDS[c.type].power);
+    const own = nortons.filter((n) => n.id === c.id);
+    const supply = own.filter((n) => power.includes(n.pin));
+    const delivered = supply.reduce((a, n) => a + pin_currents[`${n.id}.${n.pin}`], 0);
+    const rail = supply[0] ? nodeV(supply[0].np) - nodeV(supply[0].nn) : 0;
+    component_results[c.id] = {
+      current_a: delivered,
+      voltage_v: rail,
+      power_w: own.reduce((a, n) => a + Math.max(0, pin_currents[`${n.id}.${n.pin}`]) * n.emf, 0),
+    };
+  }
+
+  for (const c of comps) {
+    if (isBoardType(c.type)) continue;
     const val = defaultValue(c);
     // A device with a lead in mid-air carries nothing, so it drops nothing. Reading
     // the node voltages directly would otherwise invent a current through it.
@@ -389,5 +482,5 @@ export function solveDC(graph: CircuitGraph): Simulation {
     }
   }
 
-  return { status: 'ok', node_voltages, component_results, iterations };
+  return { status: 'ok', node_voltages, component_results, iterations, pin_currents };
 }
