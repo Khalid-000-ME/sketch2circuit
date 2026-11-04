@@ -410,7 +410,7 @@ What the model returns is checked three ways before anyone can use it:
    what it does not model. A part that fails its checks can only be added
    deliberately ("Add anyway").
 
-Parts are kept in this browser ("My parts"). Eight ship ready to use — relay, zener,
+Parts are kept in this browser ("My parts"). Nine ship ready to use — relay, zener,
 NPN, PNP, logic-level MOSFET, op-amp, Schottky diode, LDR, NTC thermistor
 ([`parts.ts`](src/fixtures/parts.ts)) — each held to its own checks by
 [`part-assert.ts`](scripts/part-assert.ts), whose 23 primitive cases were worked out

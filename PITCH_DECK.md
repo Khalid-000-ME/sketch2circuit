@@ -118,7 +118,7 @@ Use this file as the source for building the deck in Claude Design. Each section
 - Type "a 5V relay with one normally open contact rated 10A". The app builds the part: symbol, 3D body, named pins, readings and limits.
 - **The behaviour is checked, not claimed.** A part is a small network of the same device models the simulator already runs (resistors, diodes, zeners, switches, relays, transistors, MOSFETs, op-amps). The part ships with its own bench tests, and the real solver runs them. A failed test goes back to the model with the measured numbers to fix.
 - **It tells you what it does not know.** Each part shows what it assumes and what it does not model, and is labelled "DC only" or "approximate" when it is. A made-up thing ("a flux capacitor") is refused with a reason.
-- Eight ready-made parts ship (relay, zener, NPN, PNP, logic-level MOSFET, op-amp, Schottky diode, light sensor, thermistor). Parts you describe are kept for next time.
+- Nine ready-made parts ship (relay, zener, NPN, PNP, logic-level MOSFET, op-amp, Schottky diode, light sensor, thermistor). Parts you describe are kept for next time.
 
 **Proof points (say these, they are true):**
 - A relay in a circuit pulls in at the right coil voltage and lights an LED; starve the coil and it stays open. The numbers match a hand calculation to within about 0.2%.
@@ -136,8 +136,8 @@ Use this file as the source for building the deck in Claude Design. Each section
 - Exact netlist (every connection correct): **3 of 3** original sketches, plus both board sketches and a table-only page. **[measured]**
 - Schematic readability: 15 saved cases, **zero** overlap or crossing conflicts. **[measured]**
 - Solver: matches hand calculation within **0.1%**. **[measured]**
-- Device models (relay, zener, transistors, MOSFET, op-amp, diode, current source): **23 hand-computed cases** pass, plus 8 starter parts and 4 whole circuits. **[measured]**
-- 3D scene: **0** parts inside parts, wires inside parts, or wires touching, across 14 circuits including a busy board. **[measured]**
+- Device models (relay, zener, transistors, MOSFET, op-amp, diode, current source): **23 hand-computed cases** pass, plus 9 starter parts and 4 whole circuits. **[measured]**
+- 3D scene: **0** parts inside parts, wires inside parts, or wires touching, across 18 circuits including a busy board. **[measured]**
 
 **Said out loud, not on the slide:** the test set is small and was drawn by us. A described part's checks are written by the same model that wrote the part, so the app shows them to you rather than asking for trust; the solver proves the circuit behaves as the checks say, not that it matches a datasheet. Real phone photos in varied lighting are the next test. The Model API's response time varies between about 12 and 95 seconds on the same image, so we built a timeout and a cached fallback that is always labelled.
 
