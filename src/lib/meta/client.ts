@@ -49,7 +49,9 @@ function mapUpstream(status: number, body: string): HttpError {
 
 async function post(path: string, body: unknown, opts: MetaRequestOptions = {}): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
+  // Every caller passes its own ceiling; this is the backstop. It is generous
+  // because the Model API's latency has a long tail and a late answer beats none.
+  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 90_000);
   if (opts.signal) opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
   try {
     const res = await fetch(`${META_BASE_URL}${path}`, {
@@ -83,19 +85,48 @@ export async function postStream(path: string, body: unknown, opts?: MetaRequest
   return post(path, { ...(body as object), stream: true }, opts);
 }
 
+/** No chunk for this long means the stream has stalled. */
+const STREAM_IDLE_MS = 30_000;
+/** A whole stream may not take longer than this, however steadily it trickles. */
+const STREAM_TOTAL_MS = 120_000;
+
+/** Resolves to the sentinel if `ms` passes first. Clears its own timer. */
+function withDeadline<T>(promise: Promise<T>, ms: number, sentinel: symbol): Promise<T | symbol> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<symbol>((resolve) => { timer = setTimeout(() => resolve(sentinel), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+const STALLED = Symbol('stream-stalled');
+
 /**
  * Turns an SSE body into the async iterable of decoded events that
  * `@meta-sam/parser` consumes.
+ *
+ * The read is bounded in two ways, because the request timeout cannot help here:
+ * it is cleared the moment the response headers arrive, and everything expensive
+ * happens afterwards. Without these a stalled stream hangs the request
+ * indefinitely — one measured at twenty-seven minutes before this existed.
  */
 export async function* sseEvents(res: Response): AsyncGenerator<{ type: string } & Record<string, unknown>> {
   const body = res.body;
   if (!body) throw new HttpError(500, 'Something went wrong analysing that. Try again.', 'empty stream body');
   const reader = body.getReader();
   const decoder = new TextDecoder();
+  const startedAt = Date.now();
   let buffer = '';
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const next = await withDeadline(reader.read(), STREAM_IDLE_MS, STALLED);
+      if (next === STALLED) {
+        await reader.cancel().catch(() => {});
+        throw new HttpError(504, 'That took too long. Try a simpler sketch or a clearer photo.', 'segmentation stream stalled');
+      }
+      if (Date.now() - startedAt > STREAM_TOTAL_MS) {
+        await reader.cancel().catch(() => {});
+        throw new HttpError(504, 'That took too long. Try a simpler sketch or a clearer photo.', 'segmentation stream exceeded its budget');
+      }
+      const { done, value } = next as ReadableStreamReadResult<Uint8Array>;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let nl: number;

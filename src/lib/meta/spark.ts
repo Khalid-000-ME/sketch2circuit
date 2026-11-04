@@ -54,7 +54,11 @@ async function sparkJson<T>(
     },
   };
   if (opts.effort) body.reasoning_effort = opts.effort;
-  const res = await postJson<ChatResponse>('/chat/completions', body, { timeoutMs: 60_000, ...opts });
+  // The page read is a long prompt asking for a lot of structure, and Muse Spark
+  // reasons for as long as it needs. Measured against the live API it ranges from
+  // about 20s to past a minute for the same image, so the ceiling is generous:
+  // a slow answer is worth far more than a timeout.
+  const res = await postJson<ChatResponse>('/chat/completions', body, { timeoutMs: 95_000, ...opts });
   const text = res.choices?.[0]?.message?.content ?? '';
   return text ? extractJson<T>(text) : null;
 }
