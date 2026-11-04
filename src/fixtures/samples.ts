@@ -10,7 +10,7 @@
 
 import { analyseGraph } from '../lib/pipeline/analyse';
 import type { AnalyzeResponse, CircuitGraph, Confidence } from '../lib/types';
-import { LED_NO_RESISTOR, PARALLEL_SWITCH, SERIES_OK } from './circuits';
+import { ARDUINO_BLINK_OK, LED_NO_RESISTOR, PARALLEL_SWITCH, PI_LED_DIRECT, SERIES_OK } from './circuits';
 
 export interface Sample {
   id: string;
@@ -49,6 +49,24 @@ export const SAMPLES: Sample[] = [
     difficulty: 'medium',
     graph: PARALLEL_SWITCH,
     confidence: { components: 0.91, connectivity: 0.84, values: 0.86 },
+  },
+  {
+    id: 'arduino-blink',
+    title: 'Arduino blink',
+    description: 'Pin D13 drives a red LED through a 220Ω resistor.',
+    image: '/samples/sample-arduino-blink.png',
+    difficulty: 'medium',
+    graph: ARDUINO_BLINK_OK,
+    confidence: { components: 0.95, connectivity: 0.9, values: 0.92 },
+  },
+  {
+    id: 'pi-led-direct',
+    title: 'The Pi pin that burns',
+    description: 'A Raspberry Pi GPIO pin driving an LED with nothing in between.',
+    image: '/samples/sample-pi-led-direct.png',
+    difficulty: 'medium',
+    graph: PI_LED_DIRECT,
+    confidence: { components: 0.95, connectivity: 0.88, values: 0.95 },
   },
 ];
 

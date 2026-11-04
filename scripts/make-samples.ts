@@ -154,7 +154,42 @@ const s3 = page([
   label(150, 520, '9V'), label(500, 180, 'SW', 36), label(760, 700, 'grn', 34),
 ].join(''));
 
+/** A development board: a wobbly box, its name, and the pin labels along one edge. */
+function board(x: number, y: number, w: number, h: number, title: string, side: 'right' | 'left', pins: Array<[string, number]>): string {
+  const edge = side === 'right' ? x + w : x;
+  const box = poly([[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]], 3);
+  const labels = pins.map(([name, py]) =>
+    `<text x="${side === 'right' ? edge - 14 : edge + 14}" y="${py + 8}" text-anchor="${side === 'right' ? 'end' : 'start'}" font-family="Bradley Hand, Segoe Print, Comic Sans MS, cursive" font-size="34" fill="#2f3d52" stroke="none">${name}</text>`).join('');
+  // Horizontal, inside the box, and without the pen stroke the group would hand it:
+  // rotated text with a 4px outline is not something a person would write.
+  const name = `<text x="${x + w / 2}" y="${y + 46}" text-anchor="middle" font-family="Bradley Hand, Segoe Print, Comic Sans MS, cursive" font-size="30" fill="#2f3d52" stroke="none">${title}</text>`;
+  return box + labels + name;
+}
+
+// ── Sample 4: an Arduino blinking an LED the right way ──────────────────────
+seed = 2024;
+const s4 = page([
+  board(190, 260, 250, 440, 'ARDUINO UNO', 'right', [['D13', 360], ['D12', 440], ['5V', 540], ['GND', 640]]),
+  line(440, 352, 620, 352), resistor(740, 352, true), line(860, 352, 980, 352),
+  led(1060, 352, 'right'), line(1100, 352, 1200, 352),
+  line(1200, 352, 1200, 632), line(1200, 632, 440, 632),
+  label(690, 280, '220Ω'), label(1010, 270, 'LED', 42),
+  label(330, 200, 'blink', 40, -2),
+].join(''));
+
+// ── Sample 5: a Raspberry Pi pin driving an LED with nothing in between ─────
+seed = 909;
+const s5 = page([
+  board(190, 240, 260, 480, 'RASPBERRY PI', 'right', [['GPIO17', 340], ['GPIO27', 430], ['3V3', 540], ['GND', 650]]),
+  line(450, 332, 820, 332), led(900, 332, 'right'), line(940, 332, 1140, 332),
+  line(1140, 332, 1140, 642), line(1140, 642, 450, 642),
+  label(860, 262, 'LED', 42),
+  label(250, 180, 'will this work?', 38, -2),
+].join(''));
+
 const out: Array<[string, string]> = [
+  ['sample-arduino-blink.png', s4],
+  ['sample-pi-led-direct.png', s5],
   ['sample-series-ok.png', s1],
   ['sample-led-no-resistor.png', s2],
   ['sample-parallel-switch.png', s3],
