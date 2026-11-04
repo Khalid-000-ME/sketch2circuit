@@ -305,6 +305,17 @@ Other decisions worth knowing:
   on a log scale, so a 1mA branch visibly creeps next to a 500mA one.
 - `prefers-reduced-motion` skips the assembly animation and freezes the pulse.
 
+**Nothing is inside anything else.** Wires used to arc at a fixed height and ignore
+what was under them, so on the Pi and the motor driver they ran through the board
+and a body. Now ([`plan.ts`](src/three/plan.ts)) each wire rises from its pin,
+clears the tallest part under its path, and takes a free height or a sideways lane
+against wires of other nets; a wire that finds no route is placed first on the next
+attempt. Parts are separated by the rectangle each really occupies, including
+geometry built off-centre, in whole grid steps. [`check-3d.ts`](scripts/check-3d.ts)
+measures it headlessly on every fixture plus a busy board, for part-on-part,
+wire-in-part and wire-touching-wire, and it was shown to fail when avoidance is
+switched off (wires inside the Pi, inside the motor).
+
 ---
 
 ## Boards: Arduino and Raspberry Pi
@@ -356,10 +367,66 @@ shows each wired pin with its current and a High / Low / Input control.
 Parts stay where they are put: the layout is only ever asked to place parts it has
 not placed before, so wiring something never undoes a drag.
 
+**The 3D board edits the same way.** Drag a part along the board (it snaps to the
+grid and will not be dropped onto another part); click a pin, then another, to wire
+them; click a wire to remove it; **R** turns the selected part and **Delete**
+removes it. Wires re-route as a part moves. Once anything is placed by hand every
+part is held where it is, and a part added later lands on the nearest free spot
+beside whatever it connects to. Driven with a real pointer in
+[`edit3d-test.ts`](scripts/edit3d-test.ts).
+
 Each of these was driven in a real browser
 ([`interact-test.ts`](scripts/interact-test.ts), 17 checks). Placement is measured
 relative to parts that never move, since selecting a part brings it into view and
 screen coordinates change when nothing has.
+
+## Describe a part
+
+**Add part → Describe a part…** takes a plain description ("a 5V relay with one
+normally open contact rated 10A") and adds that part to the circuit, with a
+symbol, a 3D body, named pins, readings and limits.
+
+The behaviour is not a claim by the model. A part is a small network of the same
+device primitives the solver already runs — resistor, diode, zener, voltage and
+current source, switch, relay-style voltage-controlled switch, BJT (Ebers-Moll),
+MOSFET (square law) and op-amp — between its pins and a few hidden nodes
+([`partdef.ts`](src/lib/circuit/partdef.ts), [`devices.ts`](src/lib/circuit/devices.ts)).
+A relay is a coil resistor plus a switch the coil closes; a 5.1V zener is a diode
+with a breakdown. Because those are exactly what a drawn resistor or LED is
+simulated with, the part behaves as described *to the extent the primitives can say
+it*, and `limits` records what they cannot.
+
+What the model returns is checked three ways before anyone can use it:
+
+1. **Validation.** Unknown pins, values out of range and unsolvable shapes are
+   rejected with the reason.
+2. **The bench.** Each part carries 2–5 checks (drive these pins with these
+   sources, expect this voltage or current). They are built into an ordinary circuit
+   and run through the real solver ([`part-checks.ts`](src/lib/circuit/part-checks.ts)).
+   A check that fails is sent back to the model with the measured numbers, up to
+   three rounds; a timed-out round is retried. In live runs a 9.1V zener needed a
+   second round and passed after it.
+3. **You.** The dialog shows what the solver measured, what the part assumes, and
+   what it does not model. A part that fails its checks can only be added
+   deliberately ("Add anyway").
+
+Parts are kept in this browser ("My parts"). Eight ship ready to use — relay, zener,
+NPN, PNP, logic-level MOSFET, op-amp, Schottky diode, LDR, NTC thermistor
+([`parts.ts`](src/fixtures/parts.ts)) — each held to its own checks by
+[`part-assert.ts`](scripts/part-assert.ts), whose 23 primitive cases were worked out
+by hand from the device equations.
+
+**What this does not promise.** The checks come from the same model that wrote the
+part, so a part can be consistent with its own checks and still differ from its
+datasheet; that is why they are shown. The simulator is DC only, so a 555, a
+microcontroller or anything defined by timing is modelled at its steady state and
+labelled "DC only" or "approximate". Live, an HC-SR04 came back as a supply draw and
+an echo pull-down, labelled DC only, and "a flux capacitor" was refused with a
+reason. A part that is not an electronic component is refused rather than invented.
+
+Ratings the description gives become findings like any other: a relay contact
+past its 10A, or a transistor past its collector current, is flagged in the
+same plain language.
 
 ## Written connections
 
@@ -525,6 +592,11 @@ scripts/
 ```bash
 npx tsx scripts/engine-test.ts    # solver and rules against eight fixtures
 npx tsx scripts/edit-test.ts      # edit → re-solve → finding clears, in a browser
+npx tsx scripts/part-assert.ts    # device primitives, starter parts, whole circuits, by hand
+npx tsx scripts/check-3d.ts       # no part in a part, no wire in a part, no wires touching
+npx tsx scripts/edit3d-test.ts    # drag, wire, remove, turn, delete in the 3D view
+npx tsx scripts/describe-ui-test.ts  # the describe-a-part dialog (canned model reply)
+npx tsx scripts/live-parts.ts "a 9.1V zener"  # describe parts to the live model
 npx eslint src scripts
 npx tsc --noEmit
 ```
@@ -533,8 +605,11 @@ npx tsc --noEmit
 
 ## Honest limitations
 
-- **Only the schematic is draggable.** The 3D board is orbit-only; moving parts
-  there would mean re-routing every wire tube on each pointer move, which is not done.
+- **3D wire routing is a search, not a guarantee.** Wires avoid parts and each
+  other by choosing a height and a lane, tested on every fixture and a busy board;
+  a board packed tighter than that can leave a wire with no clean option, in which
+  case it takes its best attempt and may touch another. The camera is not re-framed
+  when a part is added and the board grows.
 - **Two boards.** Arduino Uno and Raspberry Pi. No Nano, Mega, ESP32, Pico or
   peripherals (LCDs, servos, sensors); `wokwi-elements` is the obvious route to those.
 - **The solver runs DC only,** so a board's firmware is not simulated: a pin is
@@ -553,13 +628,12 @@ npx tsc --noEmit
 - **DC only.** No transient or AC analysis. Capacitors are open circuits and
   inductors are shorts, which is correct for an operating point and useless for
   anything time-varying.
-- **Transistors and ICs are drawn and inspected but not simulated.** The app says
-  so in a finding rather than quietly reporting zero and letting you assume it
-  modelled them.
+- **A transistor or IC *drawn* on a sketch is shown but not simulated,** because a
+  sketch does not say which kind it is. The app says so in a finding. A transistor
+  *added* from the palette, or any part described, is simulated.
 - **Potentiometer wipers are fixed at 50%.**
-- **Switch state is read from the sketch and is editable, but there is no way to
-  add a component the vision stage missed** — you can correct a type, change a
-  value, or delete a part, not insert one.
+- **A described part is only as true as its description and its checks.** See
+  *Describe a part*. Timing, firmware and radio behaviour are not modelled.
 - **The bundled sample sketches are generated, not photographed.** They are drawn
   with jittered strokes on ruled paper so the perception stage faces roughly the
   same question a phone photo asks, but they are not a substitute for testing on
