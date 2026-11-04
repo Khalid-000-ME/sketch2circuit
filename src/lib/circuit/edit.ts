@@ -70,7 +70,7 @@ const pinsOf = (net: Net) => new Set(net.pins);
  * Joins two pins. Whatever nets they are already on become one; a pin on no net
  * is added to the other's; two bare pins get a net of their own.
  */
-export function connectPins(nets: Net[], a: string, b: string): Net[] {
+export function connectPins(nets: Net[], a: string, b: string, source: Net['source'] = 'user'): Net[] {
   if (a === b) return nets;
   const na = nets.find((n) => pinsOf(n).has(a));
   const nb = nets.find((n) => pinsOf(n).has(b));
@@ -81,13 +81,13 @@ export function connectPins(nets: Net[], a: string, b: string): Net[] {
       ...na,
       pins: [...new Set([...na.pins, ...nb.pins])],
       is_ground: Boolean(na.is_ground || nb.is_ground) || undefined,
-      source: 'user',
+      source,
     };
     return [...nets.filter((n) => n !== na && n !== nb), merged];
   }
-  if (na) return nets.map((n) => (n === na ? { ...n, pins: [...n.pins, b], source: 'user' as const } : n));
-  if (nb) return nets.map((n) => (n === nb ? { ...n, pins: [...n.pins, a], source: 'user' as const } : n));
-  return [...nets, { id: `E${nets.length + 1}`, pins: [a, b], source: 'user' }];
+  if (na) return nets.map((n) => (n === na ? { ...n, pins: [...n.pins, b], source } : n));
+  if (nb) return nets.map((n) => (n === nb ? { ...n, pins: [...n.pins, a], source } : n));
+  return [...nets, { id: `E${nets.length + 1}`, pins: [a, b], source }];
 }
 
 /**

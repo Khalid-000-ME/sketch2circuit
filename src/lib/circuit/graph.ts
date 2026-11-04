@@ -62,7 +62,7 @@ export function normaliseType(raw: string | null | undefined): ComponentType {
 }
 
 /** Maps loose pin names onto a component's canonical pins. */
-function normalisePin(type: ComponentType, raw: string): string {
+export function normalisePin(type: ComponentType, raw: string): string {
   const pins = PINS[type];
   const p = raw.toLowerCase().trim();
   if (pins.includes(p)) return p;

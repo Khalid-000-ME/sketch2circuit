@@ -69,7 +69,7 @@ export interface Net {
   pins: string[];
   is_ground?: boolean;
   /** How the net was recovered: the deterministic mask walk, or the model. */
-  source?: 'mask_trace' | 'model' | 'user';
+  source?: 'mask_trace' | 'model' | 'user' | 'written';
   confidence?: number;
 }
 
@@ -112,8 +112,24 @@ export interface CircuitGraph {
   nets: Net[];
 }
 
+/**
+ * A connection that is stated in writing on the page, as opposed to drawn: a row
+ * in a wiring table, an arrow between two names. It is an explicit statement, and
+ * is kept as one so the circuit can be checked against it as it is edited.
+ */
+export interface SpecConnection {
+  id: string;
+  /** The line as it was written, for the person to recognise. */
+  text: string;
+  /** Pin references, "U1.D13". Resolved: these name pins that exist. */
+  a: string;
+  b: string;
+}
+
 export interface AnalyzeResponse extends CircuitGraph {
   circuit_id: string;
+  /** Connections written on the page, resolved to pins. Absent when there were none. */
+  spec?: SpecConnection[];
   /**
    * True when this is a stored result for a bundled sample rather than a fresh
    * analysis of the image. The interface says so, because a cached circuit that
