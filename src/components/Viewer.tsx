@@ -174,6 +174,14 @@ export default function Viewer({
         aria-label="Three-dimensional view of the recovered circuit. Use the component list to inspect parts without a pointer."
       />
 
+      <button
+        type="button"
+        onClick={() => sceneRef.current?.fitView()}
+        className="absolute right-3 top-3 h-9 rounded-md border border-edge bg-panel/80 px-3 text-[12px] text-dim backdrop-blur transition hover:border-accent/50 hover:text-ink"
+      >
+        Fit
+      </button>
+
       {pending ? (
         <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-warn/50 bg-panel/90 px-3 py-2 text-[12px] text-ink backdrop-blur">
           <span>Wiring from <span className="font-mono text-warn">{pending}</span>. Click another pin.</span>

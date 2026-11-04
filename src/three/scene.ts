@@ -102,6 +102,8 @@ export class CircuitScene {
   private wireHighlight: THREE.Mesh | null = null;
   private wiresDirty = false;
   private plane = new THREE.Plane(UP, 0);
+  /** The last board the layout produced, so the view can be refitted on demand. */
+  private boardSize: { width: number; depth: number; cx: number; cz: number } = { width: 6, depth: 5, cx: 0, cz: 0 };
   private drag: { id: string; grab: THREE.Vector3; start: { x: number; y: number }; moved: boolean; last: { x: number; z: number } } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private callbacks: SceneCallbacks = {}) {
@@ -253,9 +255,13 @@ export class CircuitScene {
 
     this.applyCurrentToLeds();
     this.computeNetCurrents(nets);
-    // A rebuilt scene keeps the camera where the person left it; only a new
-    // circuit is framed.
+    this.boardSize = { width: board.width, depth: board.depth, cx: board.cx ?? 0, cz: board.cz ?? 0 };
+    // A new circuit is framed from scratch. A rebuilt one keeps the camera where
+    // the person left it — unless that would leave a part off-screen, where they
+    // could neither see nor click it. Adding a part grows the board, so without
+    // this a part could sit outside the canvas with no way to reach it.
     if (animate) this.frameCamera(board);
+    else if (!this.everythingVisible()) this.fitView();
     if (animate && !prefersReducedMotion()) this.playAssembly(components, nets);
     this.callbacks.onReady?.();
   }
@@ -329,6 +335,39 @@ export class CircuitScene {
       Math.cos(azimuth) * Math.cos(elevation) * dist,
     );
     this.controls.target.set(board.cx ?? 0, 0.25, board.cz ?? 0);
+    this.controls.update();
+  }
+
+  /** Whether every part and pin projects inside the canvas, with a margin. */
+  private everythingVisible(): boolean {
+    this.camera.updateMatrixWorld(true);
+    const inside = (v: THREE.Vector3) => {
+      const p = v.clone().project(this.camera);
+      return p.z < 1 && p.x >= -0.94 && p.x <= 0.94 && p.y >= -0.94 && p.y <= 0.94;
+    };
+    for (const e of this.placed.values()) if (!inside(e.placement.position.clone().setY(0.3))) return false;
+    for (const [, p] of this.pinPositions) if (!inside(p)) return false;
+    return true;
+  }
+
+  /**
+   * Pulls back to fit the whole board, keeping the angle the person is looking
+   * from. `frameCamera` chooses an angle as well, which is right for a new
+   * circuit and wrong for an edit: it would spin the board out from under them.
+   */
+  fitView() {
+    const { width, depth, cx, cz } = this.boardSize;
+    const radius = Math.hypot(width, depth) / 2;
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(this.camera.aspect, 0.2));
+    const half = Math.min(vFov, hFov) / 2;
+    const dist = Math.max(4.5, (radius * 1.12) / Math.sin(half));
+    const target = new THREE.Vector3(cx, 0.25, cz);
+    const dir = this.camera.position.clone().sub(this.controls.target);
+    if (dir.lengthSq() < 1e-6) dir.set(0.5, 0.7, 0.9);
+    dir.normalize();
+    this.camera.position.copy(target).addScaledVector(dir, dist);
+    this.controls.target.copy(target);
     this.controls.update();
   }
 

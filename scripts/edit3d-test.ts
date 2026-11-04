@@ -62,6 +62,13 @@ async function main() {
   const kept = i.parts[pick];
   check('dragged part stays put after an edit', Math.hypot(kept.x - after.x, kept.z - after.z) < 0.01, JSON.stringify({ after, kept }));
   check('new part appears', Object.keys(i.parts).length === 4);
+  // Adding a part grows the board. Everything must stay inside the canvas, or it
+  // is both invisible and unclickable — a part you cannot reach is not editable.
+  const box = (await page.locator('canvas').boundingBox())!;
+  const outside = Object.entries(i.pins)
+    .filter(([, p]) => p.x < box.x || p.x > box.x + box.width || p.y < box.y || p.y > box.y + box.height)
+    .map(([ref]) => ref);
+  check('every pin stays on screen after adding a part', outside.length === 0, `off-screen: ${outside.join(', ')}`);
   const cap = Object.keys(i.parts).find((id) => id.startsWith('C'))!;
 
   // 3. Wire two pins by clicking them.
