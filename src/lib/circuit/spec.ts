@@ -101,9 +101,21 @@ export function applySpec(components: CircuitComponent[], nets: Net[], raws: Raw
 
     // A part named without a pin. Fine for a resistor, which has no wrong end, and
     // a guess for anything else, so it is refused instead of guessed.
+    //
+    // Which end of the resistor is judged by what is already true. If one end
+    // already sits on the same connection as the other endpoint, the line is
+    // describing that end, and it is simply confirmed. Only when neither does is a
+    // free end taken. Taking the first free end unconditionally read "R1 -> LED +"
+    // on a drawn circuit as a contradiction, because both of R1's ends were already
+    // connected and it fell back to the wrong one.
     const bind = (end: { part: CircuitComponent; pin: string | null }, other: { part: CircuitComponent; pin: string | null }) => {
       if (end.pin) return end.pin;
       if (!SYMMETRIC.has(end.part.type)) return null;
+      if (other.pin) {
+        const target = netOfPin(current, `${other.part.id}.${other.pin}`);
+        const already = target && end.part.pins.find((pin) => netOfPin(current, `${end.part.id}.${pin}`) === target);
+        if (already) return already;
+      }
       const avoid = other.part.id === end.part.id && other.pin ? `${other.part.id}.${other.pin}` : null;
       return freePin(end.part, current, avoid) ?? end.part.pins[0];
     };

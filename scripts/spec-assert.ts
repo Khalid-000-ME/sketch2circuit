@@ -33,6 +33,14 @@ const drawn = canonicalise(ALL_FIXTURES.ARDUINO_BLINK_OK).nets;
 r = applySpec(parts, drawn, [{ from: 'U1.D13', to: 'R1.a' }, { from: 'D1.cathode', to: 'U1.GND' }]);
 check('lines the drawing already shows are confirmed, not duplicated', sig(r.nets) === sig(drawn) && r.items.every((i) => specStatus(i, r.nets) === 'satisfied'));
 
+// 2b. A bare resistor on a circuit that is already fully drawn names the end that
+// is already there, instead of reading as a contradiction.
+r = applySpec(parts, drawn, [{ from: 'U1.D13', to: 'R1', text: 'D13 -> R1' }, { from: 'R1', to: 'D1.anode', text: 'R1 -> LED +' }]);
+check('a bare resistor on a drawn circuit means the end that is already there',
+  r.items[0]?.b === 'R1.a' && r.items[1]?.a === 'R1.b' && r.items.every((i) => specStatus(i, r.nets) === 'satisfied'),
+  JSON.stringify(r.items.map((i) => [i.a, i.b])));
+check('and raises no warnings', r.warnings.length === 0, r.warnings.join(' | '));
+
 // 3. A line that adds to a partly drawn circuit is applied.
 const partial = connectPins([], 'U1.D13', 'R1.a');
 r = applySpec(parts, partial, [{ from: 'R1.b', to: 'D1.anode' }, { from: 'D1.cathode', to: 'U1.GND' }]);
