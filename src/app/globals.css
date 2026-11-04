@@ -35,8 +35,14 @@
   --color-warn: var(--warn);
   --color-ok: var(--ok);
   --color-info: var(--info);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /*
+    Literal names, not var(--font-sans-var): Tailwind resolves @theme inline at
+    parse time, so a variable Next injects at runtime would resolve to nothing
+    here and every utility would silently fall back to the browser default.
+  */
+  --font-sans: "Inter", "Inter Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, monospace;
+  --font-display: "Instrument Serif", "Instrument Serif Fallback", ui-serif, Georgia, serif;
 }
 
 html, body { height: 100%; }
@@ -44,7 +50,7 @@ html, body { height: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans-var), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -140,7 +146,7 @@ body {
 .symbol .symbol-polarity {
   fill: #d7e0ea;
   stroke: none;
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-sans-var), system-ui, sans-serif;
   text-anchor: middle;
 }
 .symbol .symbol-glyph { font-size: 17px; font-weight: 600; }
@@ -165,7 +171,7 @@ body {
 .symbol-label text {
   stroke: none;
   text-anchor: middle;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-mono-var), ui-monospace, monospace;
   pointer-events: none;
 }
 .symbol-ref { fill: #aebbcc; font-size: 13px; font-weight: 600; }
@@ -191,12 +197,12 @@ body {
 .symbol rect.board-body { fill: #101722; }
 .symbol .symbol-title {
   fill: #6b7a8d; stroke: none; text-anchor: middle;
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-sans-var), system-ui, sans-serif;
   font-size: 13px; font-weight: 600; letter-spacing: 0.18em;
 }
 .symbol .symbol-pinlabel {
   fill: #aebbcc; stroke: none;
-  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px;
+  font-family: var(--font-mono-var), ui-monospace, monospace; font-size: 11px;
 }
 .symbol--selected .symbol-pinlabel { fill: var(--accent); }
 
@@ -205,7 +211,7 @@ body {
 .net-flag line { stroke: #8fa3bb; stroke-width: 2; stroke-linecap: round; fill: none; }
 .net-flag-label {
   fill: #aebbcc; stroke: var(--bg); stroke-width: 4px; paint-order: stroke fill;
-  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; font-weight: 600;
+  font-family: var(--font-mono-var), ui-monospace, monospace; font-size: 11px; font-weight: 600;
 }
 
 /* A faulted board pulses its outline, not its forty pin leads: colouring every
@@ -229,6 +235,6 @@ body {
 .symbol--dragging { opacity: 0.8; }
 
 kbd {
-  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 10px;
+  font-family: var(--font-mono-var), ui-monospace, monospace; font-size: 10px;
   border: 1px solid var(--border-strong); border-radius: 3px; padding: 0 4px;
 }
