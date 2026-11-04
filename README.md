@@ -307,6 +307,101 @@ Other decisions worth knowing:
 
 ---
 
+## Boards: Arduino and Raspberry Pi
+
+A board is not a part with two leads. It is supply pins and general-purpose pins,
+and the mistakes worth catching are all about their limits. Both boards are
+modelled from the manufacturers' published figures, kept in one table
+([`boards.ts`](src/lib/circuit/boards.ts)) that the solver, the rules, the symbols
+and the 3D models all read.
+
+| | Arduino Uno | Raspberry Pi |
+|---|---|---|
+| Logic level | 5V | 3.3V |
+| Per-pin current | warn above 20mA, damage above 40mA | warn above 8mA, damage above 16mA |
+| Pin tolerance | up to 5.5V | **3.6V; not 5V tolerant** |
+| Supply pins | 5V (0.5A), 3V3 (0.15A) | 3V3 (0.05A), 5V (1A) |
+
+A driven pin or supply pin is a voltage behind a resistance, stamped as a Norton
+equivalent, so it adds no unknowns to the matrix. **What a pin is doing is set by
+firmware, which a sketch cannot show**, so a wired pin is assumed to be driven
+HIGH, the case that is hardest on whatever is on it. That assumption is stated as
+a finding, shown as "assumed" in the inspector, and editable per pin.
+
+New checks: pin overcurrent, voltage above what a pin tolerates (5V into a Pi
+GPIO), a supply pin asked for more than it can give, and a missing GND. The solver
+was checked against currents worked out by hand from the same LED model and agrees
+to under 0.1 percent ([`engine-assert.ts`](scripts/engine-assert.ts)).
+
+Pins are **strict**: an unrecognised pin name is dropped and reported, never
+remapped. Every other part falls back to its first pin when a name is unclear,
+which is harmless on a resistor and wrong on a board, where silently wiring `D99`
+to `RESET` is worse than saying it does not exist.
+
+In the schematic a board is a labelled block, and ground and supply rails are drawn
+as **symbols at each pin instead of wires**, as every schematic tool does: a ground
+drawn as a wire must be routed round the whole symbol, and reads as touching every
+pin it passes.
+
+Both boards are also built in 3D (the Pi on its real physical pin map).
+
+## Editing
+
+The schematic is an editor. Drag a part to move it; click a pin and then another
+to wire them (a connected pin offers Disconnect); **R** turns a part, **Delete**
+removes it, **Esc** cancels. **Add part** places any part or board. Every edit is
+re-solved, so the findings change as the circuit does, and a board's inspector
+shows each wired pin with its current and a High / Low / Input control.
+
+Parts stay where they are put: the layout is only ever asked to place parts it has
+not placed before, so wiring something never undoes a drag.
+
+Each of these was driven in a real browser
+([`interact-test.ts`](scripts/interact-test.ts), 17 checks). Placement is measured
+relative to parts that never move, since selecting a part brings it into view and
+screen coordinates change when nothing has.
+
+## Phone capture
+
+On the capture screen, **Use your phone** shows a QR code. Scan it, photograph the
+circuit with the phone's own camera, and the photo arrives on the desktop and is
+analysed exactly as an upload would be.
+
+The phone page is a file input with `capture`, not a live viewfinder: that works
+over plain HTTP on a local network, where `getUserMedia` is refused, and the OS
+camera gives a full-resolution, focused shot.
+
+- **Same network.** The link uses the machine's private LAN address, not
+  `localhost` (which on a phone means the phone). Wi-Fi and Ethernet are preferred.
+- **Firewall.** macOS may ask whether Node may accept incoming connections. Allow it.
+- **A tunnel or a deployment:** set `PUBLIC_ORIGIN` (see `.env.example`).
+- **Sessions are in process memory.** Right for one server and two devices; wrong
+  for several instances, where the phone's upload and the desktop's poll can land on
+  different ones. That case needs a shared store.
+- The token is 128 bits from the system CSPRNG and the only thing that identifies
+  anything; it expires after ten minutes, the store is capped, and the photo is
+  deleted the moment it is collected.
+
+[`pair-test.ts`](scripts/pair-test.ts) runs two browsers, one an emulated iPhone, over
+the LAN address, and **decodes the QR from the rendered pixels** with an independent
+reader. A code that draws is not a code that scans.
+
+## What was reused, and what was not
+
+Before building boards I looked at what already exists, checking licence and
+contents directly against the repositories instead of trusting search snippets.
+
+| Source | Licence | Used? |
+|---|---|---|
+| [wokwi/wokwi-elements](https://github.com/wokwi/wokwi-elements) | MIT | **No, but the best candidate.** Realistic 2D parts (Uno, Nano, Mega, ESP32, about fifty more) with real pin coordinates. It has no Raspberry Pi, and it is 2D, so it would be a third view, not a replacement. |
+| [KiCad packages3D](https://github.com/KiCad/kicad-packages3D) | CC-BY-SA 4.0 | **No.** Redistributing converted models means keeping share-alike and attribution, and the archived snapshot contains no Arduino or Pi (only a Wemos D1 mini). |
+| [tscircuit/3d-viewer](https://github.com/tscircuit/3d-viewer) | MIT | No. Generic chips and passives, heavy dependency tree. |
+| [JENW1N/ohmlet](https://github.com/JENW1N/ohmlet) | MIT | No. A Three.js breadboard simulator built from procedural parts, which is the same approach as here. A reference, not copied: whether the hackathon allows starting from existing code is still an open question in the PRD. |
+| A ready-made Arduino or Pi `.glb` | none found | Nothing clearly licensed turned up on GitHub. |
+
+So the boards are procedural, which keeps the licensing clean and matches how every
+other part here is built.
+
 ## Running it
 
 ```bash
@@ -337,6 +432,9 @@ can never drift from real output. Only the perception stage is pre-supplied.
 | `META_BASE_URL` | `https://api.meta.ai/v1` | API base |
 | `SPARK_MODEL` | `muse-spark-1.3` | Reasoning and value reading |
 | `SAM_MODEL` | `sam-3.1` | Segmentation |
+| `PUBLIC_ORIGIN` | the machine's LAN address | Where a phone should be sent, for a tunnel or deployment |
+| `SAMPLE_DEADLINE_MS` | `45000` | How long a bundled sample may spend in live analysis before its cached result is shown |
+| `ANALYZE_BUDGET_MS` | `150000` | Hard ceiling on any single analysis |
 
 ### Cost per analysis
 
@@ -404,6 +502,17 @@ npx tsc --noEmit
 
 ## Honest limitations
 
+- **Only the schematic is draggable.** The 3D board is orbit-only; moving parts
+  there would mean re-routing every wire tube on each pointer move, which is not done.
+- **Two boards.** Arduino Uno and Raspberry Pi. No Nano, Mega, ESP32, Pico or
+  peripherals (LCDs, servos, sensors); `wokwi-elements` is the obvious route to those.
+- **The solver runs DC only,** so a board's firmware is not simulated: a pin is
+  High, Low or Input, not a program.
+- **Board pin labels are read by the model,** since nothing on the page says where
+  each pin is. The wire to a board is traced; which pin it reaches is not.
+- **Wiring by keyboard is not supported.** Parts can be selected, turned and deleted
+  from the keyboard; connecting two pins needs a pointer.
+- **Phone pairing needs one server and one network** (see above).
 - **DC only.** No transient or AC analysis. Capacitors are open circuits and
   inductors are shorts, which is correct for an operating point and useless for
   anything time-varying.
