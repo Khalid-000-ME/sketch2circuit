@@ -101,9 +101,11 @@ export function runCheck(def: PartDef, check: PartCheck): CheckResult {
     let what: string;
     if (x.kind === 'voltage') {
       const a = voltageOf(x.a!);
-      const b = voltageOf(x.b!);
+      // With no second pin the reading is against the bench ground, which is the
+      // node every solved voltage is already measured from.
+      const b = x.b ? voltageOf(x.b) : 0;
       measured = a != null && b != null ? a - b : null;
-      what = `V(${x.a} to ${x.b})`;
+      what = x.b ? `V(${x.a} to ${x.b})` : `V(${x.a})`;
     } else {
       measured = sim.part_currents?.P1?.[x.pin!] ?? null;
       what = `current into ${x.pin}`;

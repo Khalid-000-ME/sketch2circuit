@@ -63,7 +63,7 @@ export interface Drive {
 
 export interface Expect {
   kind: 'voltage' | 'current';
-  /** voltage: from `a` to `b`. */
+  /** voltage: from `a` to `b`; with no `b`, from `a` to the bench ground. */
   a?: string;
   b?: string;
   /** current: flowing into the part at this pin. */
@@ -285,7 +285,7 @@ export function validatePart(raw: unknown): Validated {
     }
     for (const x of c.expect) {
       if (![x.a, x.b, x.pin].every(pinOk)) errors.push(`check ${i + 1} expects a reading on a pin the part does not have`);
-      if (x.kind === 'voltage' && (x.a == null || x.b == null)) errors.push(`check ${i + 1} expects a voltage without a and b`);
+      if (x.kind === 'voltage' && x.a == null && x.pin == null) errors.push(`check ${i + 1} expects a voltage without a pin to measure`);
       if (x.kind === 'current' && x.pin == null) errors.push(`check ${i + 1} expects a current without a pin`);
       if (x.min > x.max) errors.push(`check ${i + 1} has min above max`);
     }
@@ -320,8 +320,10 @@ export function validatePart(raw: unknown): Validated {
       })),
       expect: c.expect.map((x) => ({
         ...x,
+        // A voltage given on `pin` alone means that pin against the bench ground.
+        ...(x.kind === 'voltage' && !x.a && x.pin ? { a: lower(x.pin), pin: undefined } : {}),
         ...(x.a ? { a: lower(x.a) } : {}), ...(x.b ? { b: lower(x.b) } : {}),
-        ...(x.pin ? { pin: lower(x.pin) } : {}),
+        ...(x.pin && x.kind === 'current' ? { pin: lower(x.pin) } : {}),
       })),
     })),
   };

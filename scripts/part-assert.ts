@@ -31,6 +31,14 @@ const divider = mk({ name: 'Divider', pins: [{ name: 'top', side: 'left' }, { na
 t('divider midpoint and current', divider, { say: '', drive: [src('top', 'bot', 9)],
   expect: [{ kind: 'voltage', a: 'mid', b: 'bot', min: 5.999, max: 6.001 }, { kind: 'current', pin: 'top', min: 0.002999, max: 0.003001 }] });
 
+// A voltage given on one pin is that pin against the bench ground (the source's negative end).
+t('one-pin voltage reads against ground', divider, { say: '', drive: [src('top', 'bot', 9)], expect: [{ kind: 'voltage', a: 'mid', min: 5.999, max: 6.001 }] });
+const viaPin = validatePart({ ...base, name: 'D', pins: [{ name: 'top', side: 'left' }, { name: 'mid', side: 'right' }, { name: 'bot', side: 'left' }],
+  elements: [{ kind: 'resistor', a: 'top', b: 'mid', ohms: 1000 }, { kind: 'resistor', a: 'mid', b: 'bot', ohms: 2000 }],
+  checks: [{ say: 's', drive: [src('top', 'bot', 9)], expect: [{ kind: 'voltage', pin: 'mid', min: 5.999, max: 6.001 }] }] });
+if (viaPin.ok && viaPin.def?.checks[0].expect[0].a === 'mid') console.log('ok   a voltage written with "pin" is read as the pin against ground');
+else { failed++; console.log('FAIL voltage on "pin" was not understood'); }
+
 // 2. Editable value: a resistor whose ohms is the part's value. 12V over 470 = 25.532mA.
 const vr = mk({ name: 'R', pins: [{ name: 'a', side: 'left' }, { name: 'b', side: 'right' }], param: { label: 'R', unit: 'ohm', default: 1000 },
   elements: [{ kind: 'resistor', a: 'a', b: 'b', ohms: 'value' }] });

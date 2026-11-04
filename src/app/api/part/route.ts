@@ -47,7 +47,13 @@ export async function POST(req: Request) {
       clearTimeout(timer);
     }
   } catch (err) {
-    if (err instanceof HttpError) return NextResponse.json({ error: err.userMessage }, { status: err.status });
+    if (err instanceof HttpError) {
+      // The shared transport words a timeout for a photo; this is a part.
+      const message = err.status === 504
+        ? 'The model took too long to design that part. Try again, or describe it more simply.'
+        : err.userMessage;
+      return NextResponse.json({ error: message }, { status: err.status });
+    }
     console.error('[part]', err);
     return NextResponse.json({ error: 'That part could not be made. Try again.' }, { status: 500 });
   }
