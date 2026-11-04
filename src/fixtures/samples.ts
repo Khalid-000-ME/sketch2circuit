@@ -9,6 +9,7 @@
  */
 
 import { analyseGraph } from '../lib/pipeline/analyse';
+import type { RawSpec } from '../lib/circuit/spec';
 import type { AnalyzeResponse, CircuitGraph, Confidence } from '../lib/types';
 import { ARDUINO_BLINK_OK, LED_NO_RESISTOR, PARALLEL_SWITCH, PI_LED_DIRECT, SERIES_OK } from './circuits';
 
@@ -19,6 +20,8 @@ export interface Sample {
   image: string;
   difficulty: 'easy' | 'medium' | 'hard';
   graph: CircuitGraph;
+  /** What the sketch states in writing, for a sketch that has any. */
+  spec?: RawSpec[];
   confidence: Confidence;
 }
 
@@ -68,6 +71,21 @@ export const SAMPLES: Sample[] = [
     graph: PI_LED_DIRECT,
     confidence: { components: 0.95, connectivity: 0.88, values: 0.95 },
   },
+  {
+    id: 'wiring-table',
+    title: 'A wiring table, no drawing',
+    description: 'Only a written list of which pin goes where. No wires drawn at all.',
+    image: '/samples/sample-wiring-table.png',
+    difficulty: 'hard',
+    // The parts, and nothing joining them: every connection comes from the writing.
+    graph: { components: ARDUINO_BLINK_OK.components, nets: [] },
+    spec: [
+      { from: 'U1.D13', to: 'R1', text: 'D13  ->  R1' },
+      { from: 'R1', to: 'D1.anode', text: 'R1  ->  LED +' },
+      { from: 'D1.cathode', to: 'U1.GND', text: 'LED -  ->  GND' },
+    ],
+    confidence: { components: 0.92, connectivity: 0.9, values: 0.9 },
+  },
 ];
 
 const cache = new Map<string, AnalyzeResponse>();
@@ -80,9 +98,10 @@ export function prebakedFor(sampleId: string | null | undefined): AnalyzeRespons
   const sample = SAMPLES.find((s) => s.id === sampleId);
   if (!sample) return null;
 
-  const analysis = analyseGraph(sample.graph);
+  const analysis = analyseGraph(sample.graph, sample.spec);
   const response: AnalyzeResponse = {
     circuit_id: `c_sample_${sample.id}`,
+    ...(analysis.spec.length ? { spec: analysis.spec } : {}),
     cached: true,
     components: analysis.components,
     nets: analysis.nets,

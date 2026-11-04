@@ -66,6 +66,8 @@ export interface PerceiveResult extends CircuitGraph {
   confidence: Confidence;
   warnings: string[];
   notes: string[];
+  /** Connections written on the page, as read. Resolved against the parts later. */
+  spec_raw: Array<{ from: string; to: string; text: string }>;
   segmentation: {
     concept_counts: Record<string, number>;
     masks: Array<{
@@ -451,7 +453,9 @@ export async function perceive(
       warnings.push('No wire lines were segmented, so connectivity came from the model rather than from the traced lines. Check each connection.');
     }
   }
-  if (nets.length === 0) {
+  // A page that is only a table has no drawn wires and is not a failure: the
+  // connections are in the writing, applied after this.
+  if (nets.length === 0 && reading.written_connections.length === 0) {
     warnings.push('No connections could be recovered from this image. The components below were still identified.');
   }
 
@@ -503,6 +507,7 @@ export async function perceive(
     confidence,
     warnings,
     notes,
+    spec_raw: reading.written_connections,
     segmentation: {
       concept_counts: Object.fromEntries(segmented.map((r) => [r.concept, r.masks.length])),
       masks: allMasks.slice(0, 40).map((m) => ({

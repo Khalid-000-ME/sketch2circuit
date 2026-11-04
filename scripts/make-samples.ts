@@ -187,7 +187,24 @@ const s5 = page([
   label(250, 180, 'will this work?', 38, -2),
 ].join(''));
 
+// ── Sample 6: a wiring table and no drawing at all ─────────────────────────
+seed = 31337;
+const row = (y: number, text: string, size = 44) =>
+  `<text x="260" y="${y}" font-family="Bradley Hand, Segoe Print, Comic Sans MS, cursive" font-size="${size}" fill="#2f3d52" stroke="none">${text}</text>`;
+const s6 = page([
+  row(190, 'Wiring', 58),
+  line(260, 210, 470, 210, 2),
+  row(300, 'Arduino Uno  (U1)', 40),
+  row(360, 'R1 = 220\u03A9 resistor', 40),
+  row(420, 'D1 = red LED', 40),
+  line(260, 470, 1000, 470, 2),
+  row(560, 'D13  ->  R1'),
+  row(650, 'R1  ->  LED +'),
+  row(740, 'LED -  ->  GND'),
+].join(''));
+
 const out: Array<[string, string]> = [
+  ['sample-wiring-table.png', s6],
   ['sample-arduino-blink.png', s4],
   ['sample-pi-led-direct.png', s5],
   ['sample-series-ok.png', s1],

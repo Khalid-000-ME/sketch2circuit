@@ -92,6 +92,11 @@ export interface SparkReading {
   nets: Array<{ pins: string[]; is_ground?: boolean }>;
   /** Noun phrases to hand to SAM, one request each. */
   sam_concepts: string[];
+  /**
+   * Connections stated in writing — a wiring table, arrows between names — kept
+   * apart from `nets`, which come from drawn wires. They are different evidence.
+   */
+  written_connections: Array<{ from: string; to: string; text: string }>;
   confidence: { components: number; connectivity: number; values: number };
   notes: string[];
   is_circuit: boolean;
@@ -138,6 +143,14 @@ const SKETCH_SCHEMA = {
         },
       },
       sam_concepts: { type: 'array', items: { type: 'string' } },
+      written_connections: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { from: { type: 'string' }, to: { type: 'string' }, text: { type: 'string' } },
+          required: ['from', 'to', 'text'],
+        },
+      },
       confidence: {
         type: 'object',
         properties: {
@@ -146,7 +159,7 @@ const SKETCH_SCHEMA = {
       },
       notes: { type: 'array', items: { type: 'string' } },
     },
-    required: ['is_circuit', 'components', 'nets', 'sam_concepts', 'confidence'],
+    required: ['is_circuit', 'components', 'nets', 'sam_concepts', 'written_connections', 'confidence'],
   },
 } as const;
 
@@ -154,13 +167,14 @@ const SKETCH_SYSTEM = `You read photographs of hand-drawn electronic circuit dia
 
 Rules:
 - Identify every component symbol you can see. Use these type names only: resistor, led, battery, ground, junction, capacitor, capacitor_electrolytic, switch, diode, potentiometer, transistor, ic, inductor, crystal, header, buzzer, motor, arduino_uno, raspberry_pi. Use arduino_uno for any Arduino or similar ATmega development board, and raspberry_pi for any Raspberry Pi. If a symbol is unmistakably electronic but matches none of these, use "unknown".
-- Give each component a conventional reference id: R1, R2 for resistors; D1 for LEDs and diodes; B1 for batteries and supplies; C1 for capacitors; SW1 for switches; Q1 for transistors; U1 for ICs; L1 for inductors; RV1 for potentiometers; M1 for motors; LS1 for buzzers; UNO1 for an Arduino; RPI1 for a Raspberry Pi. Number from 1 in reading order. Never reuse an id.
+- If the page labels a part with a reference (U1, R2, D3), use exactly that as its id. Otherwise give it a conventional reference id: R1, R2 for resistors; D1 for LEDs and diodes; B1 for batteries and supplies; C1 for capacitors; SW1 for switches; Q1 for transistors; U1 for ICs; L1 for inductors; RV1 for potentiometers; M1 for motors; LS1 for buzzers; UNO1 for an Arduino; RPI1 for a Raspberry Pi. Number from 1 in reading order. Never reuse an id.
 - "value" is exactly the text written on the sketch, with no unit and no interpretation: "220", "4.7k", "9". A board has no value: use null. For an LED with no number, use the colour word if one is written or drawn, otherwise null. If nothing is written, use null — never invent a plausible value.
 - "unit" is one of ohm, V, F, H, A, Hz, or null.
 - "orientation" matters for led, diode, battery and electrolytic capacitor. Describe which way the symbol points in the image: anode_left, anode_right, anode_up, anode_down, pos_left, pos_right, pos_up, pos_down. Null when it does not matter.
 - "bbox_permille" is [x, y, width, height] in thousandths of the image width and height, origin at the top-left. Be tight around the symbol itself, not its label.
 - "nets" describes which leads are electrically joined, following the drawn wires. Each pin reference is "<component_id>.<pin>". Pin names: resistor a/b; led and diode anode/cathode; battery pos/neg; capacitor a/b; electrolytic pos/neg; switch a/b; potentiometer a/b/wiper; transistor base/collector/emitter; buzzer pos/neg; motor a/b; ground gnd; inductor a/b; arduino_uno D0 to D13, A0 to A5, 5V, 3V3, VIN, GND, RESET; raspberry_pi GPIO2 to GPIO27, 3V3, 5V, GND. For a board, use the pin label printed or written beside the lead the wire reaches, exactly as written, and list in nets only the pins that a wire is actually drawn to. A Raspberry Pi pin written as a bare number is its GPIO number; if the drawing numbers the physical header positions, write them as "pin 11". Every lead that touches a wire must appear in exactly one net. Mark the net that a ground symbol or the battery's negative terminal sits on with is_ground.
 - Wires that cross without a solder dot are NOT connected. A dot, or a clear T-junction, means they are.
+- "written_connections" records connections that are STATED IN WRITING on the page, as opposed to drawn as wires: a wiring table, a pin list, arrows between names ("D13 -> R1", "LED + to pin 13", "GND - LED -"). One entry per stated connection. "from" and "to" are pin references in the same form as nets ("UNO1.D13", "D1.anode"); for a part whose two ends are interchangeable, such as a resistor, where no end is given write just its id ("R1"). For an LED, "+" or the long leg is the anode and "-" or the short leg is the cathode. "text" is the line copied as written. Record only what is written: never turn a drawn wire into an entry, and never invent a connection that no line states. If a line names several things ("LED on pin 13 through 220 ohms"), record only the pairs it states outright. A part that appears only in the writing and is not drawn still belongs in "components", with bbox_permille null. If nothing is written, return an empty array.
 - "sam_concepts" lists short noun phrases for a segmentation model to find in this image, one concept per distinct thing worth isolating. Always include a phrase for the drawn connecting lines, such as "drawn wire line". Add one phrase per component kind present, phrased as it appears on paper: "zigzag resistor symbol", "LED triangle symbol", "battery symbol", "handwritten value label". Six concepts at most.
 - "confidence" is your own honest assessment, 0 to 1, separately for component identification, connectivity and value reading. Be conservative: if two leads are ambiguous, connectivity is below 0.7.
 - "notes" is for anything a human should double-check, in plain language, one sentence each.
@@ -187,6 +201,11 @@ export async function readSketch(imageDataUrl: string, opts: MetaRequestOptions 
     components: Array.isArray(raw.components) ? raw.components : [],
     nets: Array.isArray(raw.nets) ? raw.nets : [],
     sam_concepts: Array.isArray(raw.sam_concepts) ? raw.sam_concepts : [],
+    written_connections: Array.isArray(raw.written_connections)
+      ? raw.written_connections
+          .filter((w) => w && typeof w.from === 'string' && typeof w.to === 'string')
+          .map((w) => ({ from: w.from, to: w.to, text: String(w.text ?? `${w.from} -> ${w.to}`) }))
+      : [],
     confidence: {
       components: Number(raw.confidence?.components ?? 0.5),
       connectivity: Number(raw.confidence?.connectivity ?? 0.5),

@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { analyseGraph } from '@/lib/pipeline/analyse';
+import { analyseGraph, withWrittenEvidence } from '@/lib/pipeline/analyse';
 import { perceive } from '@/lib/pipeline/perceive';
 import { hasApiKey } from '@/lib/meta/client';
 import { HttpError, type AnalyzeResponse } from '@/lib/types';
@@ -201,15 +201,22 @@ async function withBudget<T>(
 /** The real pipeline: perceive, canonicalise, solve, judge. */
 async function analyseLive(buffer: Buffer, mime: string, signal: AbortSignal): Promise<AnalyzeResponse> {
   const perceived = await perceive(buffer, mime, signal);
-  const analysis = analyseGraph({ components: perceived.components, nets: perceived.nets });
+  const analysis = analyseGraph({ components: perceived.components, nets: perceived.nets }, perceived.spec_raw);
+  const evidence = withWrittenEvidence(
+    perceived.confidence,
+    [...perceived.warnings, ...analysis.warnings, ...perceived.notes],
+    analysis.spec,
+    analysis.nets,
+  );
   return {
     circuit_id: circuitId(),
+    ...(analysis.spec.length ? { spec: analysis.spec } : {}),
     components: analysis.components,
     nets: analysis.nets,
-    confidence: perceived.confidence,
+    confidence: evidence.confidence,
     simulation: analysis.simulation,
     findings: analysis.findings,
-    warnings: [...perceived.warnings, ...analysis.warnings, ...perceived.notes],
+    warnings: evidence.warnings,
     segmentation: perceived.segmentation,
     timings: perceived.timings,
   };
