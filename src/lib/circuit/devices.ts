@@ -215,7 +215,7 @@ export function mosfetDevice(
   return {
     tag, nodes: [d, g, sNode], nonlinear: true,
     eval: (v, state, final) => {
-      let vd = s * v[0], vg = s * v[1], vs = s * v[2];
+      const vd = s * v[0], vg = s * v[1], vs = s * v[2];
       // Limit the gate step, so a start far from the answer does not throw the
       // square law across its whole range in one iteration.
       let limited = false;
