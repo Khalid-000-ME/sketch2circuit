@@ -13,7 +13,8 @@ import { readSketch } from '../src/lib/meta/spark';
 import { DEFAULT_WIRE_CONCEPTS, isPageFurniture, segmentByBoxes, segmentConcepts } from '../src/lib/meta/sam';
 import { normaliseType } from '../src/lib/circuit/graph';
 import { PINS, type CircuitComponent } from '../src/lib/types';
-import { buildTraceGrid, buildWireGrid, labelRegions, pinAnchors, traceNets } from '../src/lib/pipeline/trace';
+import { buildTraceGrid, buildWireGrid, gridSize, labelRegions, pinAnchors, traceNets } from '../src/lib/pipeline/trace';
+import { inkRaster, removeRuledLines } from '../src/lib/pipeline/ink';
 import type { SamMask } from '../src/lib/meta/sam';
 
 const CACHE_DIR = '/tmp/sketchit-trace-cache';
@@ -115,7 +116,14 @@ async function main() {
   const componentMasks = new Map<string, SamMask>(
     (cached.componentMasks ?? []).map(([id, m]) => [id, { ...m, raster: Uint8Array.from(m.raster) }]),
   );
-  const { grid } = buildTraceGrid(components, wireMasks, imageW, imageH, componentMasks);
+
+  // The ink layer, read straight from the source image.
+  const { w: gw, h: gh } = gridSize(imageW, imageH);
+  const ink = await inkRaster(readFileSync(`public/samples/${sample}.png`), gw, gh);
+  const ruled = removeRuledLines(ink, gw, gh);
+  console.log(`ink: ${ink.reduce((a, b) => a + b, 0)} px, ${ruled} ruled lines removed`);
+
+  const { grid } = buildTraceGrid(components, wireMasks, imageW, imageH, componentMasks, ink);
   console.log(`traced grid wirePx=${grid.data.reduce((a, b) => a + b, 0)} regions=${labelRegions(grid).count}`);
 
   console.log('\npin anchors:');
@@ -144,8 +152,12 @@ async function main() {
     }
   }
 
-  const result = traceNets(components, wireMasks, imageW, imageH, componentMasks);
-  console.log(`\ntrace: coverage=${(result.coverage * 100).toFixed(0)}% regions=${result.regions} nets=${result.nets.length}`);
+  const withoutInk = traceNets(components, wireMasks, imageW, imageH, componentMasks);
+  console.log(`\nSAM wire masks only: coverage=${(withoutInk.coverage * 100).toFixed(0)}% nets=${withoutInk.nets.length}`);
+  for (const n of withoutInk.nets) console.log(`  ${n.id}: ${n.pins.join(', ')}`);
+
+  const result = traceNets(components, wireMasks, imageW, imageH, componentMasks, ink);
+  console.log(`\nwith ink layer: coverage=${(result.coverage * 100).toFixed(0)}% regions=${result.regions} nets=${result.nets.length}`);
   for (const n of result.nets) console.log(`  ${n.id}: ${n.pins.join(', ')}`);
   if (result.floating.length) console.log(`  floating: ${result.floating.join(', ')}`);
   console.log('  per-pin region:', JSON.stringify(result.assignments));
