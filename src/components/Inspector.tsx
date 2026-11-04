@@ -88,9 +88,14 @@ export default function Inspector({ component, components, nets, simulation, onC
   }
 
   const result = simulation?.component_results[component.id];
-  const hint = VALUE_HINT[component.type];
+  const described = component.type === 'custom' ? component.custom ?? null : null;
+  const hint = described
+    ? (described.param
+      ? { label: described.param.label, placeholder: String(described.param.default), unit: ({ ohm: 'Ω', V: 'V', F: 'F', H: 'H', A: 'A', Hz: 'Hz', W: 'W' } as Record<string, string>)[described.param.unit ?? ''] ?? '' }
+      : undefined)
+    : VALUE_HINT[component.type];
   const board = isBoardType(component.type) ? BOARDS[component.type] : null;
-  const connections = PINS[component.type]
+  const connections = (described ? component.pins : PINS[component.type])
     .map((pin) => {
       const ref = `${component.id}.${pin}`;
       const net = nets.find((n) => n.pins.includes(ref));
@@ -116,7 +121,7 @@ export default function Inspector({ component, components, nets, simulation, onC
           {component.id}
         </span>
         <span className="text-[13px] text-dim">
-          {TYPE_OPTIONS.find((t) => t.value === component.type)?.label ?? component.type}
+          {described?.name ?? TYPE_OPTIONS.find((t) => t.value === component.type)?.label ?? component.type}
         </span>
         <span className="ml-auto text-[11px] text-faint" title="How sure the vision stage was about this component">
           {Math.round(component.confidence * 100)}% sure
@@ -132,6 +137,23 @@ export default function Inspector({ component, components, nets, simulation, onC
       </header>
 
       <div className="space-y-4 p-4">
+        {described && (
+          <div className="rounded-md border border-edge bg-panel px-3 py-2.5">
+            <p className="text-[12px] text-dim">{described.summary}</p>
+            <p className="mt-1.5 text-[11px] text-faint">
+              {described.fidelity === 'full' ? 'Modelled fully at DC.' : described.fidelity === 'dc_only' ? 'Modelled at DC only.' : 'Approximate model.'}
+              {described.limits.length > 0 && ` Not modelled: ${described.limits.join(' ')}`}
+            </p>
+            {described.assumptions.length > 0 && (
+              <p className="mt-1 text-[11px] text-faint">Assumes: {described.assumptions.join(' ')}</p>
+            )}
+            {described.ratings.length > 0 && (
+              <p className="mt-1 text-[11px] text-faint">Limits: {described.ratings.map((r) => r.label).join('; ')}.</p>
+            )}
+          </div>
+        )}
+
+        {!described && (
         <label className="block">
           <span className="text-[11px] uppercase tracking-wider text-faint">Component type</span>
           <select
@@ -147,6 +169,7 @@ export default function Inspector({ component, components, nets, simulation, onC
             Read it wrong? Change it here and the analysis re-runs.
           </span>
         </label>
+        )}
 
         {hint && (
           <label className="block">

@@ -1,0 +1,311 @@
+{
+ "components": [
+  {
+   "id": "U1",
+   "type": "arduino_uno",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "RESET",
+    "3V3",
+    "5V",
+    "VIN",
+    "GND",
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13",
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "1k",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "Q1",
+   "type": "custom",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "c",
+    "b",
+    "e"
+   ],
+   "custom": {
+    "v": 1,
+    "name": "NPN transistor",
+    "prefix": "Q",
+    "summary": "2N2222-like, current gain 100, 40 V, 0.8 A.",
+    "pins": [
+     {
+      "name": "c",
+      "side": "top",
+      "label": "C"
+     },
+     {
+      "name": "b",
+      "side": "left",
+      "label": "B"
+     },
+     {
+      "name": "e",
+      "side": "bottom",
+      "label": "E"
+     }
+    ],
+    "internals": [],
+    "elements": [
+     {
+      "kind": "bjt",
+      "c": "c",
+      "b": "b",
+      "e": "e",
+      "polarity": "npn",
+      "beta": 100
+     }
+    ],
+    "param": null,
+    "ratings": [
+     {
+      "kind": "voltage",
+      "a": "c",
+      "b": "e",
+      "max": 40,
+      "label": "collector-emitter 40 V"
+     },
+     {
+      "kind": "current",
+      "pin": "c",
+      "max": 0.8,
+      "label": "collector current 0.8 A"
+     }
+    ],
+    "body": {
+     "colour": "#26292e",
+     "mark": "2N2222",
+     "tall": false
+    },
+    "assumptions": [
+     "Current gain 100 in the active region."
+    ],
+    "fidelity": "full",
+    "limits": [
+     "Early effect and temperature are not modelled."
+    ],
+    "checks": [
+     {
+      "say": "Amplifies base current by about 100",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "b",
+        "neg": "e",
+        "volts": 5,
+        "rint": 100000
+       },
+       {
+        "kind": "vsource",
+        "pos": "c",
+        "neg": "e",
+        "volts": 12,
+        "rint": 1000
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "c",
+        "min": 0.00425,
+        "max": 0.00435
+       },
+       {
+        "kind": "voltage",
+        "a": "c",
+        "b": "e",
+        "min": 7.6,
+        "max": 7.8
+       }
+      ]
+     },
+     {
+      "say": "Saturates as a switch",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "b",
+        "neg": "e",
+        "volts": 5,
+        "rint": 10000
+       },
+       {
+        "kind": "vsource",
+        "pos": "c",
+        "neg": "e",
+        "volts": 5,
+        "rint": 1000
+       }
+      ],
+      "expect": [
+       {
+        "kind": "voltage",
+        "a": "c",
+        "b": "e",
+        "min": 0,
+        "max": 0.2
+       }
+      ]
+     },
+     {
+      "say": "Is off with no base drive",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "b",
+        "neg": "e",
+        "volts": 0,
+        "rint": 10000
+       },
+       {
+        "kind": "vsource",
+        "pos": "c",
+        "neg": "e",
+        "volts": 5,
+        "rint": 1000
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "c",
+        "min": -0.000001,
+        "max": 0.000001
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "R2",
+   "type": "resistor",
+   "value": "470",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "led",
+   "value": "red",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "anode",
+    "cathode"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "Q1.e",
+    "U1.GND"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "R2.a"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "D1.anode",
+    "R2.b"
+   ]
+  },
+  {
+   "id": "N4",
+   "pins": [
+    "D1.cathode",
+    "Q1.c"
+   ]
+  },
+  {
+   "id": "N5",
+   "pins": [
+    "Q1.b",
+    "R1.b"
+   ]
+  },
+  {
+   "id": "N6",
+   "pins": [
+    "R1.a",
+    "U1.D13"
+   ]
+  }
+ ]
+}

@@ -538,9 +538,12 @@ export function solveDC(graph: CircuitGraph): Simulation {
     part_currents[c.id] = into;
     const volts = (name: string) => nodeV(ex.pinNodes.get(name) ?? 0);
     const power = def.pins.reduce((acc, p) => acc + volts(p.name) * into[p.name], 0);
-    const span = def.pins.length > 1
-      ? Math.max(...def.pins.map((p) => volts(p.name))) - Math.min(...def.pins.map((p) => volts(p.name)))
-      : 0;
+    // The voltage that matters for a part is the one its limits are written
+    // against; with none, the voltage between its first two pins.
+    const across = def.ratings.flatMap((r) => (r.kind === 'voltage' && ex.pinNodes.has(r.a) && ex.pinNodes.has(r.b) ? [Math.abs(volts(r.a) - volts(r.b))] : []));
+    const span = across.length
+      ? Math.max(...across)
+      : def.pins.length > 1 ? Math.abs(volts(def.pins[0].name) - volts(def.pins[1].name)) : 0;
     component_results[c.id] = {
       current_a: Math.max(0, ...Object.values(into).map(Math.abs)),
       voltage_v: span,

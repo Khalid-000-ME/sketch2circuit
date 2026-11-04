@@ -532,6 +532,66 @@ function buildUnknown(): BuiltComponent {
 }
 
 
+/**
+ * A described part: a body with a leg for each pin it declared, on the side it
+ * declared. The body's height follows what it was said to be, and its mark is
+ * printed on top, so it can be told from its neighbours without opening it.
+ */
+function buildCustom(c: CircuitComponent): BuiltComponent {
+  const def = c.custom;
+  if (!def) return buildUnknown();
+  const group = new THREE.Group();
+  const side = (name: string) => def.pins.filter((p) => p.side === name);
+  const left = side('left'), right = side('right'), top = side('top'), bottom = side('bottom');
+  const pitch = 0.3;
+  const w = Math.max(0.9, Math.max(top.length, bottom.length) * pitch + 0.5);
+  const d = Math.max(0.7, Math.max(left.length, right.length) * pitch + 0.4);
+  const h = def.body.tall ? 0.7 : 0.38;
+  const lift = 0.14;
+
+  const body = box(w, h, d, M.plastic(def.body.colour), 0.02);
+  body.position.y = lift + h / 2;
+  group.add(body);
+
+  const pins: Record<string, THREE.Vector3> = {};
+  const legs = (list: typeof left, at: (i: number, n: number) => [number, number], out: [number, number]) => {
+    list.forEach((p, i) => {
+      const [x, z] = at(i, list.length);
+      const tip = V(x + out[0] * 0.28, 0, z + out[1] * 0.28);
+      pins[p.name] = tip;
+      bentLead(V(x, lift + 0.08, z), tip, group);
+    });
+  };
+  const along = (n: number, i: number) => (i - (n - 1) / 2) * pitch;
+  legs(left, (i, n) => [-w / 2, along(n, i)], [-1, 0]);
+  legs(right, (i, n) => [w / 2, along(n, i)], [1, 0]);
+  legs(top, (i, n) => [along(n, i), -d / 2], [0, -1]);
+  legs(bottom, (i, n) => [along(n, i), d / 2], [0, 1]);
+
+  // The mark, where there is a screen to draw it on.
+  const text = (def.body.mark || def.name).slice(0, 6).toUpperCase();
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.font = '600 34px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 64, 34);
+      const mark = new THREE.Mesh(
+        new THREE.PlaneGeometry(Math.min(w * 0.8, 0.9), Math.min(w * 0.8, 0.9) / 2),
+        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }),
+      );
+      mark.rotation.x = -Math.PI / 2;
+      mark.position.y = lift + h + 0.003;
+      group.add(mark);
+    }
+  }
+  return { group, pins, bodies: [body], halfSpan: w / 2 + 0.3 };
+}
+
 // ───────────────────────────────────────────────────────────────── boards
 
 /** One header strip: a black plastic block and a row of gold pins standing out of it. */
@@ -700,6 +760,7 @@ const BUILDERS: Record<string, (c: CircuitComponent) => BuiltComponent> = {
   junction: buildJunction,
   arduino_uno: buildArduinoUno,
   raspberry_pi: buildRaspberryPi,
+  custom: buildCustom,
   unknown: buildUnknown,
 };
 

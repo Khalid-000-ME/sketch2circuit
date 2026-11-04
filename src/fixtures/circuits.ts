@@ -1,11 +1,19 @@
 /** Hand-built circuits: bundled samples, demo fallbacks and engine tests. */
 
 import type { CircuitGraph } from '../lib/types';
+import { STARTER_PARTS } from './parts';
 
 const c = (
   id: string, type: string, value: string | null = null, unit: string | null = null,
   extra: Record<string, unknown> = {},
 ) => ({ id, type, value, unit, orientation: null, bbox: null, mask_id: null, confidence: 0.95, pins: [], ...extra }) as never;
+
+/** A part from the starter set, placed. */
+const part = (id: string, name: string, value: string | null = null) => {
+  const def = STARTER_PARTS.find((p) => p.name === name);
+  if (!def) throw new Error(`no starter part called ${name}`);
+  return c(id, 'custom', value, null, { custom: def, pins: def.pins.map((p) => p.name) });
+};
 
 const n = (id: string, pins: string[], ground = false) => ({ id, pins, ...(ground ? { is_ground: true } : {}) });
 
@@ -175,8 +183,68 @@ export const ARDUINO_TO_PI_5V: CircuitGraph = {
   ],
 };
 
+/** A relay that lights an LED when its coil gets enough current: the 56 ohm lets it pull in. */
+export const RELAY_LED: CircuitGraph = {
+  components: [
+    c('B1', 'battery', '9', 'V'),
+    c('R1', 'resistor', '56', 'ohm'),
+    part('K1', '5V relay'),
+    c('R2', 'resistor', '470', 'ohm'),
+    c('D1', 'led', 'red'),
+  ],
+  nets: [
+    n('N1', ['B1.pos', 'R1.a', 'R2.a']),
+    n('N2', ['R1.b', 'K1.coil_p']),
+    n('N3', ['K1.coil_n', 'K1.no', 'B1.neg'], true),
+    n('N4', ['R2.b', 'D1.anode']),
+    n('N5', ['D1.cathode', 'K1.com']),
+  ],
+};
+
+/** The same circuit with 220 ohm in the coil path: the coil sees about 2 V and never pulls in. */
+export const RELAY_STARVED: CircuitGraph = {
+  components: RELAY_LED.components.map((x) => (x.id === 'R1' ? c('R1', 'resistor', '220', 'ohm') : x)),
+  nets: RELAY_LED.nets,
+};
+
+/** A 9 V supply regulated to about 5.1 V by a zener behind 330 ohm, with a 1k load. */
+export const ZENER_REGULATOR: CircuitGraph = {
+  components: [
+    c('B1', 'battery', '9', 'V'),
+    c('R1', 'resistor', '330', 'ohm'),
+    part('D1', 'Zener 5.1V'),
+    c('R2', 'resistor', '1k', 'ohm'),
+  ],
+  nets: [
+    n('N1', ['B1.pos', 'R1.a']),
+    n('N2', ['R1.b', 'D1.k', 'R2.a']),
+    n('N3', ['D1.a', 'R2.b', 'B1.neg'], true),
+  ],
+};
+
+/** An Arduino pin switching an LED through an NPN: the transistor saturates. */
+export const ARDUINO_NPN_LED: CircuitGraph = {
+  components: [
+    c('U1', 'arduino_uno'),
+    c('R1', 'resistor', '1k', 'ohm'),
+    part('Q1', 'NPN transistor'),
+    c('B1', 'battery', '9', 'V'),
+    c('R2', 'resistor', '470', 'ohm'),
+    c('D1', 'led', 'red'),
+  ],
+  nets: [
+    n('N1', ['U1.D13', 'R1.a']),
+    n('N2', ['R1.b', 'Q1.b']),
+    n('N3', ['B1.pos', 'R2.a']),
+    n('N4', ['R2.b', 'D1.anode']),
+    n('N5', ['D1.cathode', 'Q1.c']),
+    n('N6', ['Q1.e', 'B1.neg', 'U1.GND'], true),
+  ],
+};
+
 export const ALL_FIXTURES = {
   SERIES_OK, LED_NO_RESISTOR, RESISTOR_OVER_POWER, PARALLEL_SWITCH,
   ELECTROLYTIC_REVERSED, SUPPLY_SHORT, FLOATING_BRANCH, MOTOR_DRIVER,
   ARDUINO_BLINK_OK, ARDUINO_LED_DIRECT, PI_LED_DIRECT, PI_LED_OK, ARDUINO_TO_PI_5V,
+  RELAY_LED, RELAY_STARVED, ZENER_REGULATOR, ARDUINO_NPN_LED,
 };

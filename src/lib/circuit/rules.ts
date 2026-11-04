@@ -390,6 +390,61 @@ export function runRules(graph: CircuitGraph, sim: Simulation, floating: string[
     });
   }
 
+  // Parts the person described: judged against the limits they were given, and
+  // honest about what their model leaves out.
+  for (const c of graph.components) {
+    const def = c.custom;
+    if (c.type !== 'custom' || !def) continue;
+    if (def.fidelity !== 'full') {
+      add({
+        severity: 'info',
+        component_id: c.id,
+        rule: 'part_model_limits',
+        message: `${c.id} (${def.name}) is modelled ${def.fidelity === 'dc_only' ? 'at DC only' : 'approximately'}.${def.limits[0] ? ` ${def.limits[0]}` : ''}`,
+        fix: 'Treat its readings as its steady-state behaviour, and check anything time-dependent on a bench.',
+      });
+    }
+    if (!solved) continue;
+    const pinV = (pin: string): number | null => {
+      const net = ctx.netOf.get(`${c.id}.${pin}`);
+      return net ? sim.node_voltages[net] ?? null : null;
+    };
+    for (const r of def.ratings) {
+      let seen: number | null = null;
+      let text = '';
+      if (r.kind === 'voltage') {
+        const a = pinV(r.a); const b = pinV(r.b);
+        if (a == null || b == null) continue;
+        seen = Math.abs(a - b);
+        text = fmtV(seen);
+      } else if (r.kind === 'current') {
+        seen = Math.abs(sim.part_currents?.[c.id]?.[r.pin] ?? 0);
+        text = fmtA(seen);
+      } else {
+        seen = res(c.id)?.power_w ?? 0;
+        text = fmtW(seen);
+      }
+      const limit = r.kind === 'voltage' ? fmtV(r.max) : r.kind === 'current' ? fmtA(r.max) : fmtW(r.max);
+      if (seen > r.max) {
+        add({
+          severity: 'error',
+          component_id: c.id,
+          rule: 'part_rating_exceeded',
+          message: `${c.id} (${def.name}) is past its limit: ${r.label}. It is seeing ${text} against ${limit}, so it can be damaged.`,
+          fix: r.kind === 'voltage' ? 'Lower the voltage across it, or use a part rated for more.' : r.kind === 'current' ? 'Limit the current with a series resistor, or use a part rated for more.' : 'Reduce the load, or use a part rated for more power.',
+        });
+      } else if (seen > r.max * 0.8) {
+        add({
+          severity: 'warning',
+          component_id: c.id,
+          rule: 'part_rating_close',
+          message: `${c.id} (${def.name}) is close to its limit: ${r.label}. It is seeing ${text} against ${limit}.`,
+          fix: 'Leave some margin: parts run hot and age faster near their ratings.',
+        });
+      }
+    }
+  }
+
   // Devices outside the DC model, stated plainly rather than silently ignored.
   for (const c of graph.components.filter((x) => x.type === 'transistor' || x.type === 'ic')) {
     add({

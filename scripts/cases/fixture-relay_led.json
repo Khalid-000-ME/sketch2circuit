@@ -1,0 +1,266 @@
+{
+ "components": [
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "56",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "K1",
+   "type": "custom",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "coil_p",
+    "coil_n",
+    "com",
+    "no"
+   ],
+   "custom": {
+    "v": 1,
+    "name": "5V relay",
+    "prefix": "K",
+    "summary": "Coil of 70 ohm, pulls in at 3.75 V. One normally open contact, 10 A.",
+    "pins": [
+     {
+      "name": "coil_p",
+      "side": "left",
+      "label": "COIL+"
+     },
+     {
+      "name": "coil_n",
+      "side": "left",
+      "label": "COIL-"
+     },
+     {
+      "name": "com",
+      "side": "right",
+      "label": "COM"
+     },
+     {
+      "name": "no",
+      "side": "right",
+      "label": "NO"
+     }
+    ],
+    "internals": [],
+    "elements": [
+     {
+      "kind": "resistor",
+      "a": "coil_p",
+      "b": "coil_n",
+      "ohms": 70
+     },
+     {
+      "kind": "vswitch",
+      "a": "com",
+      "b": "no",
+      "cp": "coil_p",
+      "cn": "coil_n",
+      "threshold": 3.75,
+      "closed_above": true
+     }
+    ],
+    "param": null,
+    "ratings": [
+     {
+      "kind": "voltage",
+      "a": "coil_p",
+      "b": "coil_n",
+      "max": 7.5,
+      "label": "coil rated 5 V"
+     },
+     {
+      "kind": "current",
+      "pin": "com",
+      "max": 10,
+      "label": "contact rated 10 A"
+     }
+    ],
+    "body": {
+     "colour": "#1565c0",
+     "mark": "K",
+     "tall": true
+    },
+    "assumptions": [
+     "Pull-in at 75% of rated voltage."
+    ],
+    "fidelity": "dc_only",
+    "limits": [
+     "Contact bounce and switching time are not modelled."
+    ],
+    "checks": [
+     {
+      "say": "5 V on the coil draws about 71 mA",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "coil_p",
+        "neg": "coil_n",
+        "volts": 5,
+        "rint": 0
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "coil_p",
+        "min": 0.0705,
+        "max": 0.0723
+       }
+      ]
+     },
+     {
+      "say": "The contact closes with 5 V on the coil",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "coil_p",
+        "neg": "coil_n",
+        "volts": 5,
+        "rint": 0
+       },
+       {
+        "kind": "vsource",
+        "pos": "com",
+        "neg": "no",
+        "volts": 12,
+        "rint": 100
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "com",
+        "min": 0.1199,
+        "max": 0.1201
+       }
+      ]
+     },
+     {
+      "say": "The contact stays open with 2 V on the coil",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "coil_p",
+        "neg": "coil_n",
+        "volts": 2,
+        "rint": 0
+       },
+       {
+        "kind": "vsource",
+        "pos": "com",
+        "neg": "no",
+        "volts": 12,
+        "rint": 100
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "com",
+        "min": -0.000001,
+        "max": 0.000001
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "R2",
+   "type": "resistor",
+   "value": "470",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "led",
+   "value": "red",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "anode",
+    "cathode"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "K1.coil_n",
+    "K1.no"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "R1.a",
+    "R2.a"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "D1.anode",
+    "R2.b"
+   ]
+  },
+  {
+   "id": "N4",
+   "pins": [
+    "D1.cathode",
+    "K1.com"
+   ]
+  },
+  {
+   "id": "N5",
+   "pins": [
+    "K1.coil_p",
+    "R1.b"
+   ]
+  }
+ ]
+}

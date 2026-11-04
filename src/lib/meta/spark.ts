@@ -36,7 +36,7 @@ export function extractJson<T>(text: string): T | null {
   return null;
 }
 
-async function sparkJson<T>(
+export async function sparkJson<T>(
   system: string,
   content: Array<Json>,
   schema: { name: string; schema: Json },
@@ -68,8 +68,8 @@ async function sparkJson<T>(
   return text ? extractJson<T>(text) : null;
 }
 
-const imagePart = (dataUrl: string): Json => ({ type: 'image_url', image_url: { url: dataUrl } });
-const textPart = (text: string): Json => ({ type: 'text', text });
+export const imagePart = (dataUrl: string): Json => ({ type: 'image_url', image_url: { url: dataUrl } });
+export const textPart = (text: string): Json => ({ type: 'text', text });
 
 // ───────────────────────────────────────────────────────── whole-sketch pass
 

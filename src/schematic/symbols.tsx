@@ -429,9 +429,65 @@ function boardSymbol(c: CircuitComponent): SymbolDef {
   };
 }
 
+/**
+ * A described part: a labelled block, drawn from the pins it declared.
+ *
+ * Pins on the top go to the left column and pins on the bottom to the right, so
+ * every lead leaves horizontally like a board's; the labels carry the meaning.
+ * The width follows the longest label, kept on the grid so wires leave cleanly.
+ */
+function customSymbol(c: CircuitComponent): SymbolDef {
+  const def = c.custom!;
+  const left = def.pins.filter((p) => p.side === 'left' || p.side === 'top');
+  const right = def.pins.filter((p) => p.side === 'right' || p.side === 'bottom');
+  const rows = Math.max(left.length, right.length, 2);
+  // One row at the top is the title's, so it never sits on a pin label.
+  const half = ((rows + 2) * BOARD_ROW) / 2;
+  const top = -half + BOARD_ROW * 1.5;
+  const longest = Math.max(...def.pins.map((p) => p.label.length), 2);
+  const title = def.name.length > 18 ? `${def.name.slice(0, 17)}…` : def.name;
+  const halfW = Math.max(40, Math.ceil((Math.max(longest * 2, title.length) * 6.4 + 24) / 20) * 20);
+  const inset = halfW + 20;
+
+  const pins: Pins = {};
+  const labels = new Map<string, string>();
+  left.forEach((p, i) => { pins[p.name] = [-inset, top + i * BOARD_ROW]; labels.set(p.name, p.label); });
+  right.forEach((p, i) => { pins[p.name] = [inset, top + i * BOARD_ROW]; labels.set(p.name, p.label); });
+
+  return {
+    pins,
+    half: [inset, half],
+    bodyHalf: [halfW, half],
+    fixed: true,
+    draw: () => (
+      <>
+        <rect className="board-body" x={-halfW} y={-half} width={halfW * 2} height={half * 2} rx={4} />
+        <text className="symbol-title" x={0} y={-half + 15} textAnchor="middle">{title}</text>
+        {Object.entries(pins).map(([name, [px, py]]) => {
+          const isLeft = px < 0;
+          return (
+            <g key={name}>
+              <line className="board-pin" x1={px} y1={py} x2={isLeft ? -halfW : halfW} y2={py} />
+              <text
+                className="symbol-pinlabel"
+                x={isLeft ? -halfW + 6 : halfW - 6}
+                y={py + 4}
+                textAnchor={isLeft ? 'start' : 'end'}
+              >
+                {labels.get(name)}
+              </text>
+            </g>
+          );
+        })}
+      </>
+    ),
+  };
+}
+
 /** The symbol for a component. Pin-count-dependent types are built per instance. */
 export function symbolFor(c: CircuitComponent): SymbolDef {
   if (isBoardType(c.type)) return boardSymbol(c);
+  if (c.type === 'custom' && c.custom) return customSymbol(c);
   if (c.type === 'ic') return dipSymbol(c);
   if (c.type === 'header') return headerSymbol(c);
   return STATIC[c.type] ?? unknown;

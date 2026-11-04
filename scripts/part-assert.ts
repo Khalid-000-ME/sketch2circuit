@@ -103,5 +103,54 @@ if (bad.ok) { failed++; console.log('FAIL validation accepted an unknown node');
 const nan = validatePart({ ...base, name: 'Bad', pins: [{ name: 'a', side: 'left' }, { name: 'b', side: 'left' }], elements: [{ kind: 'resistor', a: 'a', b: 'b', ohms: 0 }] });
 if (nan.ok) { failed++; console.log('FAIL validation accepted 0 ohms'); } else console.log('ok   validation rejects 0 ohms');
 
+// The parts that ship with the app are held to their own checks.
+import { STARTER_PARTS } from '../src/fixtures/parts';
+import { runChecks } from '../src/lib/circuit/part-checks';
+for (const def of STARTER_PARTS) {
+  const results = runChecks(def);
+  const bad = results.filter((r) => !r.pass);
+  if (bad.length || results.length < 2) failed++;
+  console.log(`${bad.length || results.length < 2 ? 'FAIL' : 'ok  '} starter part: ${def.name} (${results.length} checks)${bad.map((r) => `\n     ${r.say}\n       ${r.detail.join('\n       ')}`).join('')}`);
+}
+
+// Described parts inside whole circuits, against values worked out by hand.
+import { ALL_FIXTURES } from '../src/fixtures/circuits';
+import { analyseGraph } from '../src/lib/pipeline/analyse';
+function circuit(name: string, key: keyof typeof ALL_FIXTURES, expect: (a: ReturnType<typeof analyseGraph>) => string[]) {
+  const a = analyseGraph(ALL_FIXTURES[key]);
+  const problems = a.simulation.status === 'ok' ? expect(a) : [`did not solve: ${a.simulation.reason}`];
+  if (problems.length) failed++;
+  console.log(`${problems.length ? 'FAIL' : 'ok  '} circuit: ${name}${problems.map((p) => `\n     ${p}`).join('')}`);
+}
+const within = (label: string, got: number, lo: number, hi: number) => (got >= lo && got <= hi ? [] : [`${label} = ${got.toPrecision(5)}, expected ${lo} to ${hi}`]);
+const mA = (a: ReturnType<typeof analyseGraph>, id: string) => (a.simulation.component_results[id]?.current_a ?? NaN) * 1e3;
+const rules = (a: ReturnType<typeof analyseGraph>) => a.findings.map((f) => f.rule).sort().join(',');
+// By hand: Vb = 9.01 / (1 + 1.7/126 + 1.7/470) = 8.865 V, coil = 8.865/126 = 70.36 mA = 4.925 V, LED 14.7 mA.
+circuit('relay pulls in and lights the LED', 'RELAY_LED', (a) => [
+  ...within('coil current mA', mA(a, 'K1'), 69.8, 70.8),
+  ...within('coil volts', a.simulation.component_results.K1.voltage_v, 4.88, 4.96),
+  ...within('LED mA', mA(a, 'D1'), 14.4, 15.4),
+  ...(rules(a) === 'part_model_limits,power_rating_exceeded' ? [] : [`rules were ${rules(a)}`]),
+]);
+// By hand: the coil sees about 2.1 V, below the 3.75 V pull-in, so the contact stays open.
+circuit('relay stays open when starved', 'RELAY_STARVED', (a) => [
+  ...within('LED mA', mA(a, 'D1'), -0.001, 0.001),
+  ...within('coil volts', a.simulation.component_results.K1.voltage_v, 1.9, 3.7),
+]);
+// By hand, iterating Vz-node = 5.1 + 0.05 ln(Iz/5mA) + 2 Iz with 331.7 ohm and a 1k load: 5.127 V, Iz 6.55 mA.
+circuit('zener regulates a loaded supply', 'ZENER_REGULATOR', (a) => [
+  ...within('output volts', a.simulation.node_voltages[a.nets.find((n) => n.pins.includes('R2.a'))!.id], 5.10, 5.16),
+  ...within('zener mA', mA(a, 'D1'), 6.4, 6.7),
+]);
+// By hand (Ebers-Moll): Ic = 15.4 mA, Ib = 4.1 mA saturates it: Vbe 0.74 V, Vce 0.033 V.
+circuit('arduino pin saturates an npn', 'ARDUINO_NPN_LED', (a) => {
+  const v = (pin: string) => a.simulation.node_voltages[a.nets.find((n) => n.pins.includes(pin))!.id];
+  return [
+    ...within('LED mA', mA(a, 'D1'), 15.0, 15.8),
+    ...within('Vce', v('Q1.c') - v('Q1.e'), 0.02, 0.05),
+    ...within('Vbe', v('Q1.b') - v('Q1.e'), 0.72, 0.76),
+  ];
+});
+
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

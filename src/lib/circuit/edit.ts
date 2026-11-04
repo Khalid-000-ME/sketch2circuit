@@ -8,13 +8,27 @@
  */
 
 import { PINS, type CircuitComponent, type ComponentType, type Net } from '../types';
+import type { PartDef } from './partdef';
 
 export interface PartKind {
   type: ComponentType;
   label: string;
   /** What the part is given when it is first added. */
   value: string | null;
-  group: 'basic' | 'active' | 'board';
+  group: 'basic' | 'active' | 'board' | 'more' | 'mine';
+  /** A part the person described; it carries its own definition. */
+  custom?: PartDef;
+}
+
+/** A saved, described part as a palette entry. */
+export function kindFromDef(def: PartDef, group: 'more' | 'mine' = 'mine'): PartKind {
+  return {
+    type: 'custom',
+    label: def.name,
+    value: def.param ? String(def.param.default) : null,
+    group,
+    custom: def,
+  };
 }
 
 /** What can be added from the palette, in the order it is shown. */
@@ -42,15 +56,15 @@ const PREFIX: Partial<Record<ComponentType, string>> = {
 };
 
 /** The next free reference designator for a part: R1, R2, then R3. */
-export function nextId(components: CircuitComponent[], type: ComponentType): string {
-  const prefix = PREFIX[type] ?? 'X';
+export function nextId(components: CircuitComponent[], type: ComponentType, custom?: PartDef): string {
+  const prefix = custom?.prefix ?? PREFIX[type] ?? 'X';
   const used = new Set(components.map((c) => c.id));
   for (let n = 1; ; n++) if (!used.has(`${prefix}${n}`)) return `${prefix}${n}`;
 }
 
 export function makeComponent(components: CircuitComponent[], kind: PartKind): CircuitComponent {
   return {
-    id: nextId(components, kind.type),
+    id: nextId(components, kind.type, kind.custom),
     type: kind.type,
     value: kind.value,
     unit: null,
@@ -59,8 +73,9 @@ export function makeComponent(components: CircuitComponent[], kind: PartKind): C
     mask_id: null,
     // Placed by hand, so there is nothing uncertain about it.
     confidence: 1,
-    pins: [...PINS[kind.type]],
+    pins: kind.custom ? kind.custom.pins.map((p) => p.name) : [...PINS[kind.type]],
     user_edited: true,
+    ...(kind.custom ? { custom: kind.custom } : {}),
   };
 }
 

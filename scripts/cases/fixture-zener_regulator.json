@@ -1,0 +1,202 @@
+{
+ "components": [
+  {
+   "id": "B1",
+   "type": "battery",
+   "value": "9",
+   "unit": "V",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "pos",
+    "neg"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "330",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "custom",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "k"
+   ],
+   "custom": {
+    "v": 1,
+    "name": "Zener 5.1V",
+    "prefix": "D",
+    "summary": "1N4733A-like. Holds 5.1 V in reverse, 1 W.",
+    "pins": [
+     {
+      "name": "a",
+      "side": "left",
+      "label": "A"
+     },
+     {
+      "name": "k",
+      "side": "right",
+      "label": "K"
+     }
+    ],
+    "internals": [],
+    "elements": [
+     {
+      "kind": "zener",
+      "a": "a",
+      "k": "k",
+      "vz": 5.1,
+      "rs": 2
+     }
+    ],
+    "param": null,
+    "ratings": [
+     {
+      "kind": "power",
+      "max": 1,
+      "label": "1 W dissipation"
+     }
+    ],
+    "body": {
+     "colour": "#b0b7bf",
+     "mark": "Z5V1",
+     "tall": false
+    },
+    "assumptions": [
+     "5.1 V is reached at 5 mA."
+    ],
+    "fidelity": "full",
+    "limits": [],
+    "checks": [
+     {
+      "say": "Holds about 5.1 V in reverse behind 330 ohm from 9 V",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "k",
+        "neg": "a",
+        "volts": 9,
+        "rint": 330
+       }
+      ],
+      "expect": [
+       {
+        "kind": "voltage",
+        "a": "k",
+        "b": "a",
+        "min": 5.14,
+        "max": 5.19
+       },
+       {
+        "kind": "current",
+        "pin": "k",
+        "min": 0.01155,
+        "max": 0.0117
+       }
+      ]
+     },
+     {
+      "say": "Conducts forward at about 0.7 V",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "a",
+        "neg": "k",
+        "volts": 9,
+        "rint": 330
+       }
+      ],
+      "expect": [
+       {
+        "kind": "voltage",
+        "a": "a",
+        "b": "k",
+        "min": 0.7,
+        "max": 0.73
+       }
+      ]
+     },
+     {
+      "say": "Blocks below breakdown",
+      "drive": [
+       {
+        "kind": "vsource",
+        "pos": "k",
+        "neg": "a",
+        "volts": 3,
+        "rint": 330
+       }
+      ],
+      "expect": [
+       {
+        "kind": "current",
+        "pin": "k",
+        "min": -0.000001,
+        "max": 0.000001
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "R2",
+   "type": "resistor",
+   "value": "1k",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "B1.neg",
+    "D1.a",
+    "R2.b"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "B1.pos",
+    "R1.a"
+   ]
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "D1.k",
+    "R1.b",
+    "R2.a"
+   ]
+  }
+ ]
+}
