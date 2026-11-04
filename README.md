@@ -361,6 +361,37 @@ Each of these was driven in a real browser
 relative to parts that never move, since selecting a part brings it into view and
 screen coordinates change when nothing has.
 
+## Written connections
+
+A page can state how things connect in writing as well as in drawing: a wiring
+table, a pin list, arrows between names (`D13 -> R1`, `R1 -> LED +`, `pin 11 ->
+LED +`). The app reads those as a separate kind of evidence from drawn wires, and
+it works on a page with **no drawing at all**.
+
+A written line is an explicit statement, so it is handled by what it would do:
+
+| The line | What happens |
+|---|---|
+| is already true of the drawing | **Confirmed.** Nothing changes. |
+| adds a connection nothing contradicts | **Applied**, before the circuit is solved, so the findings describe the circuit the writing says. |
+| would join two connections the drawing has already established | **Not applied, and reported.** Merging two nets by mistake is how a supply gets shorted, so the drawing is kept and **Use the table** applies the line on request. |
+| names a pin that does not exist, a part that is not there, or an LED with no lead | **Refused, with the reason.** Never guessed. |
+
+Lines are read in the order written, so `D13 -> R1` followed by `R1 -> LED +` uses
+two different ends of R1, which has no wrong end. On a drawn circuit a bare `R1`
+means the end that is already there. Pin numbers are read as people write them:
+`pin 11` on a Pi is the physical position, so GPIO17.
+
+In the interface, a **Written on your page** checklist shows each line and whether
+it is in the circuit *right now*. Status is computed from the current nets, not
+stored, so it notices a connection removed by hand and a click restores it.
+
+Checked in three ways: [`spec-assert.ts`](scripts/spec-assert.ts) for the logic,
+[`spec-ui-test.ts`](scripts/spec-ui-test.ts) in a browser, and two pages run live
+through both models with no sample id. A page that is only a table came out exactly
+right. A page with a correct drawing and a table line that contradicts it kept the
+drawing, held the line back and said why.
+
 ## Phone capture
 
 On the capture screen, **Use your phone** shows a QR code. Scan it, photograph the
@@ -513,6 +544,12 @@ npx tsc --noEmit
 - **Wiring by keyboard is not supported.** Parts can be selected, turned and deleted
   from the keyboard; connecting two pins needs a pointer.
 - **Phone pairing needs one server and one network** (see above).
+- **A written line the model garbles is refused, not repaired.** On one live page
+  `LED - -> GND` lost its minus to the arrow, so the lead was unknown and the line
+  was dropped with a warning. Refused lines appear in the warnings, not in the
+  checklist.
+- **Written lines have no confidence of their own.** Pins a line accounts for are
+  scored by how well the handwriting was read overall.
 - **DC only.** No transient or AC analysis. Capacitors are open circuits and
   inductors are shorts, which is correct for an operating point and useless for
   anything time-varying.
