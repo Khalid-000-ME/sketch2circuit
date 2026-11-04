@@ -73,7 +73,8 @@ const resistor: SymbolDef = {
 const led: SymbolDef = {
   pins: AK,
   half: [PIN_SPAN, 16],
-  bodyHalf: [12, 13],
+  // The emission arrows reach well past the triangle, and labels must clear them.
+  bodyHalf: [14, 27],
   draw: () => (
     <>
       {lead(-PIN_SPAN, -11)}

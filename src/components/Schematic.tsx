@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CircuitComponent, Finding, Net, Simulation } from '@/lib/types';
-import { layoutSchematic, type Placement2D } from '@/schematic/layout2d';
+import { arrangeSchematic } from '@/schematic/arrange';
 import { routeSchematic } from '@/schematic/route2d';
+import { labelPlacement } from '@/schematic/labels';
 import { GRID, symbolFor, valueLabel } from '@/schematic/symbols';
 
 /**
@@ -40,7 +41,7 @@ export default function Schematic({
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null);
 
-  const layout = useMemo(() => layoutSchematic(components, nets), [components, nets]);
+  const layout = useMemo(() => arrangeSchematic(components, nets), [components, nets]);
   const routes = useMemo(() => routeSchematic(components, nets, layout), [components, nets, layout]);
 
   /*
@@ -328,29 +329,4 @@ export default function Schematic({
       </button>
     </div>
   );
-}
-
-interface LabelPos { x: number; y: number; anchor: 'middle' | 'start' }
-
-/**
- * Where the reference designator and the value sit.
- *
- * A horizontal part gets its name above and its value below, which is the
- * textbook arrangement. A vertical part gets both stacked to its right, because
- * above and below is exactly where its own leads and wires are.
- */
-function labelPlacement(p: Placement2D): [LabelPos, LabelPos] {
-  const vertical = p.rotation === 90 || p.rotation === 270;
-  if (vertical) {
-    const x = p.bodyHalf[0] + 11;
-    return [
-      { x, y: -3, anchor: 'start' },
-      { x, y: 14, anchor: 'start' },
-    ];
-  }
-  const y = p.bodyHalf[1];
-  return [
-    { x: 0, y: -y - 9, anchor: 'middle' },
-    { x: 0, y: y + 19, anchor: 'middle' },
-  ];
 }
