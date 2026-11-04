@@ -19,6 +19,9 @@ import { isBoardType } from '@/lib/circuit/boards';
 export interface Extent {
   halfX: number;
   halfZ: number;
+  /** Where the geometry's middle sits relative to the part's origin. */
+  cx?: number;
+  cz?: number;
 }
 
 export interface Placement {
@@ -173,6 +176,8 @@ export function layoutCircuit(
     });
   });
 
+  separate(placements);
+
   // Recentre on the content: the relaxation drifts, and a board whose parts sit
   // in one corner reads as a mistake even when the topology is right.
   const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
@@ -213,4 +218,64 @@ export function pinWorldPosition(
   return localPin.clone()
     .applyAxisAngle(new THREE.Vector3(0, 1, 0), placement.rotationY)
     .add(placement.position);
+}
+
+const GAP = 0.4;
+
+/** Half-extents of a part's footprint once it is turned. */
+function footprint(p: Placement) {
+  const c = Math.abs(Math.cos(p.rotationY));
+  const s = Math.abs(Math.sin(p.rotationY));
+  const cx = p.extent.cx ?? 0;
+  const cz = p.extent.cz ?? 0;
+  const r = p.rotationY;
+  return {
+    dx: c * p.extent.halfX + s * p.extent.halfZ,
+    dz: s * p.extent.halfX + c * p.extent.halfZ,
+    // The middle of the footprint in the world, which is not the origin for a
+    // part whose geometry is built off to one side.
+    mx: p.position.x + cx * Math.cos(r) + cz * Math.sin(r),
+    mz: p.position.z - cx * Math.sin(r) + cz * Math.cos(r),
+  };
+}
+
+/**
+ * Pushes parts apart until no two footprints overlap.
+ *
+ * The relaxation keeps parts apart by a round distance, which is a poor fit for a
+ * long board beside a small LED: the board is wide, so a disc big enough to clear
+ * it wastes the layout, and one small enough to be compact lets parts sit on top
+ * of it. This works on the rectangles each part really occupies, moving a pair
+ * along whichever axis frees them with the least travel, and snaps back to the
+ * grid after each pass so the board still reads as a board.
+ */
+function separate(placements: Map<string, Placement>) {
+  const list = [...placements.values()];
+  for (const p of list) {
+    p.position.x = Math.round(p.position.x / GRID) * GRID;
+    p.position.z = Math.round(p.position.z / GRID) * GRID;
+  }
+  for (let pass = 0; pass < 120; pass++) {
+    let moved = false;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        const fa = footprint(a);
+        const fb = footprint(b);
+        const ox = fa.dx + fb.dx + GAP - Math.abs(fa.mx - fb.mx);
+        const oz = fa.dz + fb.dz + GAP - Math.abs(fa.mz - fb.mz);
+        if (ox <= 0 || oz <= 0) continue;
+        moved = true;
+        const axis = ox < oz ? 'x' : 'z';
+        // Whole grid steps, so a pushed part is still on the grid and nothing has
+        // to be rounded back into its neighbour afterwards.
+        const push = Math.ceil((axis === 'x' ? ox : oz) / 2 / GRID) * GRID;
+        const sign = (axis === 'x' ? fa.mx <= fb.mx : fa.mz <= fb.mz) ? -1 : 1;
+        a.position[axis] += sign * push;
+        b.position[axis] -= sign * push;
+      }
+    }
+    if (!moved) break;
+  }
 }
