@@ -13,6 +13,7 @@
 
 import * as THREE from 'three';
 import type { CircuitComponent, Net } from '@/lib/types';
+import { isBoardType } from '@/lib/circuit/boards';
 
 /** The measured half-extents of a built component, in its own local space. */
 export interface Extent {
@@ -148,7 +149,10 @@ export function layoutCircuit(
   components.forEach((c, i) => {
     let rotationY = 0;
     const [pinA, pinB] = c.pins;
-    if (pinA && pinB) {
+    // A board's first two pins are RESET and 3V3, which say nothing about which
+    // way it should face, and a board turned to face its wires would have its
+    // headers where its connectors should be.
+    if (pinA && pinB && !isBoardType(c.type)) {
       const a = neighbourCentroid(c.id, pinA);
       const b = neighbourCentroid(c.id, pinB);
       if (a && b) {

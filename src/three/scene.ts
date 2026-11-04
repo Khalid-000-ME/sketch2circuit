@@ -17,6 +17,7 @@ import { buildComponent, disposeBuilt, type BuiltComponent } from './components'
 import { layoutCircuit, pinWorldPosition, type Extent, type Placement } from './layout';
 import { disposeRouted, routeNets, type RoutedNet } from './wires';
 import * as M from './materials';
+import { BOARDS, isBoardType } from '@/lib/circuit/boards';
 import { easeOutBack, easeOutCubic, prefersReducedMotion, tween, type Tween } from './anim';
 
 export interface SceneCallbacks {
@@ -170,10 +171,18 @@ export class CircuitScene {
       this.placed.set(c.id, { component: c, built, placement, outline: null, faultSeverity: null });
     }
 
-    const positivePins = new Set(
-      components.filter((c) => c.type === 'battery').map((c) => `${c.id}.pos`),
-    );
-    const { routed, group } = routeNets(nets, this.pinPositions, positivePins);
+    // Supply pins draw red and ground pins dark, whether they belong to a battery
+    // or to a board.
+    const positivePins = new Set<string>();
+    const groundPins = new Set<string>();
+    for (const c of components) {
+      if (c.type === 'battery') positivePins.add(`${c.id}.pos`);
+      if (isBoardType(c.type)) {
+        for (const pin of [...Object.keys(BOARDS[c.type].power), 'VIN']) positivePins.add(`${c.id}.${pin}`);
+        groundPins.add(`${c.id}.GND`);
+      }
+    }
+    const { routed, group } = routeNets(nets, this.pinPositions, positivePins, groundPins);
     this.routed = routed;
     this.wireGroup = group;
     this.root.add(group);

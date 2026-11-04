@@ -42,6 +42,15 @@ export const fr4 = () => make('fr4', {
   color: 0x0b3522, roughness: 0.52, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.55,
 });
 
+/** Solder mask over FR4: a board's own colour, glossy rather than matte. */
+export const solderMask = (colour: THREE.ColorRepresentation) =>
+  make(`mask:${String(colour)}`, { color: colour, roughness: 0.46, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.5 });
+
+/** Brushed steel: connector shells and shields. */
+// Darker than real steel on purpose: under this much image-based light a mirror
+// finish reads as a flat white slab.
+export const steel = () => make('steel', { color: 0x7f8791, roughness: 0.4, metalness: 1 });
+
 /** The gold-plated edge of the board. */
 export const boardEdge = () => make('boardEdge', { color: 0x1a1d1c, roughness: 0.7, metalness: 0.2 });
 

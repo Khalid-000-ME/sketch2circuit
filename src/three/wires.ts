@@ -109,8 +109,8 @@ function flowTube(curve: THREE.Curve<THREE.Vector3>, length: number): THREE.Mesh
 }
 
 /** Red for the net the supply's positive terminal sits on, dark for ground. */
-export function netColour(net: Net, positivePins: Set<string>): number {
-  if (net.is_ground) return M.PALETTE.wireGround;
+export function netColour(net: Net, positivePins: Set<string>, groundPins: Set<string> = new Set()): number {
+  if (net.is_ground || net.pins.some((p) => groundPins.has(p))) return M.PALETTE.wireGround;
   if (net.pins.some((p) => positivePins.has(p))) return M.PALETTE.wirePositive;
   return M.PALETTE.wireSignal;
 }
@@ -119,6 +119,7 @@ export function routeNets(
   nets: Net[],
   pinPositions: Map<string, THREE.Vector3>,
   positivePins: Set<string>,
+  groundPins: Set<string> = new Set(),
 ): { routed: RoutedNet[]; group: THREE.Group } {
   const group = new THREE.Group();
   group.name = 'wires';
@@ -130,7 +131,7 @@ export function routeNets(
       .filter((x): x is { ref: string; p: THREE.Vector3 } => x.p != null);
     if (points.length < 2) continue;
 
-    const colour = netColour(net, positivePins);
+    const colour = netColour(net, positivePins, groundPins);
     const segments: WireSegment[] = [];
     let hub: THREE.Vector3 | null = null;
     let blob: THREE.Mesh | undefined;

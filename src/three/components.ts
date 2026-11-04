@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import type { CircuitComponent } from '@/lib/types';
 import { parseValue, LED_VF } from '@/lib/circuit/units';
+import { PI_PHYSICAL } from '@/lib/circuit/boards';
 import * as M from './materials';
 
 const LEAD_R = 0.028;
@@ -530,6 +531,153 @@ function buildUnknown(): BuiltComponent {
   return { group, pins, bodies: [body], halfSpan: 0.48 };
 }
 
+
+// ───────────────────────────────────────────────────────────────── boards
+
+/** One header strip: a black plastic block and a row of gold pins standing out of it. */
+function headerStrip(
+  group: THREE.Group, x0: number, z: number, count: number, baseY: number,
+  rows = 1, rowGap = 0.254,
+): { top: number } {
+  const pitch = 0.254;
+  const height = 0.85;
+  const block = box(count * pitch, height, rows * pitch, M.plastic(0x16181c));
+  block.position.set(x0 + (count * pitch) / 2 - pitch / 2, baseY + height / 2, z + ((rows - 1) * rowGap) / 2);
+  group.add(block);
+
+  const pinGeo = new THREE.BoxGeometry(0.06, 0.34, 0.06);
+  const pins = new THREE.InstancedMesh(pinGeo, M.lead(), count * rows);
+  const m4 = new THREE.Matrix4();
+  let n = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < count; i++) {
+      m4.makeTranslation(x0 + i * pitch, baseY + height + 0.12, z + r * rowGap);
+      pins.setMatrixAt(n++, m4);
+    }
+  }
+  pins.instanceMatrix.needsUpdate = true;
+  group.add(pins);
+  return { top: baseY + height + 0.27 };
+}
+
+const BOARD_TOP = 0.24; // top face of the PCB, above its standoffs
+
+function buildArduinoUno(): BuiltComponent {
+  const group = new THREE.Group();
+  const L = 6.86, W = 5.34;
+  const pins: Record<string, THREE.Vector3> = {};
+
+  const pcb = box(L, 0.16, W, M.solderMask(0x00474c));
+  pcb.position.y = BOARD_TOP - 0.08;
+  group.add(pcb);
+
+  // Connectors on the left edge, hanging a little past it as they do on the real board.
+  const usb = box(1.6, 1.1, 1.2, M.steel());
+  usb.position.set(-L / 2 + 0.55, BOARD_TOP + 0.55, -1.0);
+  group.add(usb);
+  const jack = box(1.5, 1.1, 0.9, M.plastic(0x14161a));
+  jack.position.set(-L / 2 + 0.6, BOARD_TOP + 0.55, 1.55);
+  group.add(jack);
+
+  // The ATmega328 and the things around it.
+  const chip = box(3.5, 0.45, 0.78, M.plastic(0x15171b));
+  chip.position.set(0.55, BOARD_TOP + 0.225, 0.55);
+  group.add(chip);
+  const notch = new THREE.Mesh(new THREE.CircleGeometry(0.09, 16), M.plastic(0x08090b));
+  notch.rotation.x = -Math.PI / 2;
+  notch.position.set(-1.05, BOARD_TOP + 0.452, 0.55);
+  group.add(notch);
+  const crystal = box(0.55, 0.3, 0.3, M.steel());
+  crystal.position.set(-1.9, BOARD_TOP + 0.15, 0.2);
+  group.add(crystal);
+  const reset = box(0.5, 0.3, 0.5, M.plastic(0xc43a31));
+  reset.position.set(-2.0, BOARD_TOP + 0.15, -1.95);
+  group.add(reset);
+  for (const [x, z, c] of [[0.5, -0.4, 0x2fe06a], [0.85, -0.4, 0xffc14a]] as const) {
+    const led = box(0.2, 0.08, 0.12, M.plastic(c));
+    led.position.set(x, BOARD_TOP + 0.04, z);
+    group.add(led);
+  }
+
+  // Headers. The pin names are the ones the schematic uses; unnamed sockets are
+  // decoration, because the model has no use for SCL, SDA, AREF or IOREF.
+  const pitch = 0.254;
+  const topZ = -W / 2 + 0.36;
+  const botZ = W / 2 - 0.36;
+  const rowA = ['', '', '', 'GND', 'D13', 'D12', 'D11', 'D10', 'D9', 'D8'];
+  const rowB = ['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'];
+  const rowC = ['', '', 'RESET', '3V3', '5V', '', '', 'VIN'];
+  const rowD = ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+  const strips: Array<[string[], number, number]> = [
+    [rowA, -1.9, topZ], [rowB, 1.04, topZ], [rowC, -0.95, botZ], [rowD, 1.55, botZ],
+  ];
+  let top = BOARD_TOP + 1.1;
+  for (const [names, x0, z] of strips) {
+    top = headerStrip(group, x0, z, names.length, BOARD_TOP).top;
+    names.forEach((name, i) => { if (name) pins[name] = V(x0 + i * pitch, top, z); });
+  }
+
+  return { group, pins, bodies: [pcb], halfSpan: L / 2 + 0.1 };
+}
+
+function buildRaspberryPi(): BuiltComponent {
+  const group = new THREE.Group();
+  const L = 8.56, W = 5.65;
+  const pins: Record<string, THREE.Vector3> = {};
+
+  const pcb = box(L, 0.16, W, M.solderMask(0x064420));
+  pcb.position.y = BOARD_TOP - 0.08;
+  group.add(pcb);
+
+  // The system-on-chip under its heat spreader, and the memory beside it.
+  const soc = box(1.5, 0.2, 1.5, M.steel());
+  soc.position.set(-1.0, BOARD_TOP + 0.1, 0.45);
+  group.add(soc);
+  const ram = box(1.2, 0.14, 1.3, M.plastic(0x15171b));
+  ram.position.set(0.7, BOARD_TOP + 0.07, 0.4);
+  group.add(ram);
+
+  // The right-hand edge: two USB stacks and the Ethernet port.
+  const eth = box(2.1, 1.35, 1.6, M.steel());
+  eth.position.set(L / 2 - 1.0, BOARD_TOP + 0.675, 1.9);
+  group.add(eth);
+  for (const z of [-0.05, -1.75]) {
+    const usb = box(2.2, 1.55, 1.45, M.steel());
+    usb.position.set(L / 2 - 1.05, BOARD_TOP + 0.775, z);
+    group.add(usb);
+  }
+
+  // The bottom edge and the left: power, HDMI, audio, and the card slot.
+  const power = box(0.9, 0.35, 0.8, M.steel());
+  power.position.set(-L / 2 + 1.1, BOARD_TOP + 0.175, W / 2 - 0.4);
+  group.add(power);
+  for (const x of [-1.9, -0.55]) {
+    const hdmi = box(0.75, 0.35, 0.65, M.steel());
+    hdmi.position.set(x, BOARD_TOP + 0.175, W / 2 - 0.33);
+    group.add(hdmi);
+  }
+  const sd = box(1.5, 0.12, 1.2, M.steel());
+  sd.position.set(-L / 2 + 0.7, BOARD_TOP - 0.1, 0);
+  group.add(sd);
+
+  // The 40-pin header: two rows along the top edge, odd pins on the inner row.
+  const pitch = 0.254;
+  const hx0 = -1.5 - 19 * pitch / 2;
+  const hz = -W / 2 + 0.38;
+  const top = headerStrip(group, hx0, hz, 20, BOARD_TOP, 2, pitch).top;
+  const seen = new Set<string>();
+  for (let n = 1; n <= 40; n++) {
+    const name = PI_PHYSICAL[n];
+    if (!name || name.startsWith('ID_') || seen.has(name)) continue;
+    seen.add(name);
+    const col = Math.floor((n - 1) / 2);
+    // Odd pins sit on the row nearer the middle of the board, even ones on the edge.
+    pins[name] = V(hx0 + col * pitch, top, hz + (n % 2 === 1 ? pitch : 0));
+  }
+
+  return { group, pins, bodies: [pcb], halfSpan: L / 2 + 0.1 };
+}
+
 // ───────────────────────────────────────────────────────────────── factory
 
 const BUILDERS: Record<string, (c: CircuitComponent) => BuiltComponent> = {
@@ -550,6 +698,8 @@ const BUILDERS: Record<string, (c: CircuitComponent) => BuiltComponent> = {
   motor: buildMotor,
   ground: buildGround,
   junction: buildJunction,
+  arduino_uno: buildArduinoUno,
+  raspberry_pi: buildRaspberryPi,
   unknown: buildUnknown,
 };
 
