@@ -8,12 +8,22 @@ import Inspector from '@/components/Inspector';
 import SourceImage from '@/components/SourceImage';
 import StageStatus from '@/components/StageStatus';
 import Schematic from '@/components/Schematic';
-import Viewer from '@/components/Viewer';
+import dynamic from 'next/dynamic';
 import {
   analyze, ApiError, fetchStatus, prepareImage, simulate, toSpiceNetlist, type SampleInfo,
 } from '@/lib/client/api';
 import { connectPins, disconnectPin, makeComponent, removePart, type PartKind } from '@/lib/circuit/edit';
 import type { AnalyzeResponse, CircuitComponent, Net, PinState } from '@/lib/types';
+
+/**
+ * The 3D view pulls in three.js, which was half of everything a first visit
+ * downloaded, for a view that is not the default. It is fetched when someone
+ * opens it, and the placeholder holds the space so nothing jumps.
+ */
+const Viewer = dynamic(() => import('@/components/Viewer'), {
+  ssr: false,
+  loading: () => <div className="flex h-full items-center justify-center text-[12px] text-faint">Loading 3D view…</div>,
+});
 
 type Phase = 'capture' | 'analysing' | 'result';
 /**
@@ -257,16 +267,23 @@ export default function Page() {
 
   return (
     <main className="flex min-h-full flex-1 flex-col lg:h-screen lg:overflow-hidden">
-      <header className="flex shrink-0 items-center gap-3 border-b border-edge px-4 py-2.5">
+      {/*
+        Two groups that wrap rather than one row that clips. At phone width the
+        controls used to run off the edge with no scrollbar, which left Export
+        unreachable and hid half of the view toggle.
+      */}
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-edge px-4 py-2.5">
         <button
           type="button"
           onClick={reset}
-          className="flex h-9 items-center gap-2 rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
+          aria-label="New sketch"
+          className="flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
         >
-          ← New sketch
+          <span aria-hidden>←</span>
+          <span className="hidden sm:inline">New sketch</span>
         </button>
 
-        <div className="ml-1 flex items-center gap-2 text-[13px]">
+        <div className="ml-1 flex items-center gap-2 whitespace-nowrap text-[13px]">
           {errorCount > 0 ? (
             <>
               <span className="h-2 w-2 rounded-full bg-error" aria-hidden />
@@ -283,7 +300,7 @@ export default function Page() {
           {resimulating && <span className="ml-1 text-[12px] text-faint">re-solving…</span>}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <AddPart onAdd={handleAdd} />
           <div className="flex rounded-md border border-edge p-0.5" role="group" aria-label="View">
             {([['schematic', 'Schematic'], ['board', '3D board']] as const).map(([mode, label]) => (
@@ -292,7 +309,7 @@ export default function Page() {
                 type="button"
                 onClick={() => setViewMode(mode)}
                 aria-pressed={viewMode === mode}
-                className={`h-8 rounded px-2.5 text-[12px] transition ${
+                className={`h-8 whitespace-nowrap rounded px-2.5 text-[12px] transition ${
                   viewMode === mode ? 'bg-accent/15 text-accent' : 'text-faint hover:text-ink'
                 }`}
               >
@@ -317,7 +334,7 @@ export default function Page() {
           <button
             type="button"
             onClick={exportNetlist}
-            className="h-9 rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
+            className="h-9 whitespace-nowrap rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
           >
             Export netlist
           </button>

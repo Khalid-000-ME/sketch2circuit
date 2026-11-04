@@ -59,7 +59,7 @@ export default function AddPart({ onAdd }: { onAdd: (kind: PartKind) => void }) 
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="h-9 rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
+        className="h-9 whitespace-nowrap rounded-md border border-edge px-3 text-[13px] text-dim transition hover:border-accent/50 hover:text-ink"
       >
         Add part
       </button>

@@ -14,7 +14,12 @@ async function main() {
     await page.waitForTimeout(3000);
     await page.screenshot({ path: `/tmp/sketchit-shots/m-${name}-result.png` });
     const overflow = await page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1");
-    console.log(`${name}: horizontal overflow = ${overflow}`);
+    // The page not scrolling sideways proves little: a container that clips hides
+    // the same problem. What matters is whether every header control is on screen.
+    const offscreen = await page.evaluate(`[...document.querySelectorAll('main > header button, main > header [role=group] button')]
+      .filter((b) => { const r = b.getBoundingClientRect(); return r.right > window.innerWidth + 1 || r.left < -1; })
+      .map((b) => (b.textContent || b.getAttribute('aria-label') || '?').trim())`);
+    console.log(`${name}: horizontal overflow = ${overflow}, controls off-screen = ${JSON.stringify(offscreen)}`);
     await page.close();
   }
   await browser.close();
