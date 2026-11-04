@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AddPart from '@/components/AddPart';
 import Capture from '@/components/Capture';
 import Findings from '@/components/Findings';
 import Inspector from '@/components/Inspector';
@@ -11,7 +12,8 @@ import Viewer from '@/components/Viewer';
 import {
   analyze, ApiError, fetchStatus, prepareImage, simulate, toSpiceNetlist, type SampleInfo,
 } from '@/lib/client/api';
-import type { AnalyzeResponse, CircuitComponent, Net } from '@/lib/types';
+import { connectPins, disconnectPin, makeComponent, removePart, type PartKind } from '@/lib/circuit/edit';
+import type { AnalyzeResponse, CircuitComponent, Net, PinState } from '@/lib/types';
 
 type Phase = 'capture' | 'analysing' | 'result';
 /**
@@ -134,26 +136,47 @@ export default function Page() {
     }
   }, []);
 
+  /**
+   * Every edit goes through here: show it at once, then let the solver confirm.
+   * The optimistic update is not cosmetic — the view needs the new part to exist
+   * before it can be selected and brought into frame, and waiting for the round
+   * trip would leave it asking for something that is not there yet.
+   */
+  const commit = useCallback((nextComponents: CircuitComponent[], nextNets: Net[]) => {
+    setComponents(nextComponents);
+    setNets(nextNets);
+    void resimulate(nextComponents, nextNets);
+  }, [resimulate]);
+
   const handleChange = useCallback((id: string, patch: Partial<CircuitComponent>) => {
-    setComponents((prev) => {
-      const next = prev.map((c) => (c.id === id ? { ...c, ...patch } : c));
-      void resimulate(next, nets);
-      return next;
-    });
-  }, [nets, resimulate]);
+    commit(components.map((c) => (c.id === id ? { ...c, ...patch } : c)), nets);
+  }, [components, nets, commit]);
 
   const handleDelete = useCallback((id: string) => {
-    setComponents((prev) => {
-      const next = prev.filter((c) => c.id !== id);
-      const prunedNets = nets
-        .map((n) => ({ ...n, pins: n.pins.filter((p) => p.split('.')[0] !== id) }))
-        .filter((n) => n.pins.length > 0);
-      setNets(prunedNets);
-      void resimulate(next, prunedNets);
-      return next;
-    });
+    const next = removePart(components, nets, id);
+    commit(next.components, next.nets);
     setSelectedId(null);
-  }, [nets, resimulate]);
+  }, [components, nets, commit]);
+
+  const handleAdd = useCallback((kind: PartKind) => {
+    const part = makeComponent(components, kind);
+    commit([...components, part], nets);
+    setSelectedId(part.id);
+    setFocusToken((t) => t + 1);
+  }, [components, nets, commit]);
+
+  const handleConnect = useCallback((a: string, b: string) => {
+    commit(components, connectPins(nets, a, b));
+  }, [components, nets, commit]);
+
+  const handleDisconnect = useCallback((pin: string) => {
+    commit(components, disconnectPin(nets, pin));
+  }, [components, nets, commit]);
+
+  const handlePinState = useCallback((id: string, pin: string, state: PinState) => {
+    const part = components.find((c) => c.id === id);
+    if (part) handleChange(id, { pin_states: { ...part.pin_states, [pin]: state }, user_edited: true });
+  }, [components, handleChange]);
 
   const selectAndFocus = useCallback((id: string) => {
     setSelectedId(id);
@@ -261,6 +284,7 @@ export default function Page() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <AddPart onAdd={handleAdd} />
           <div className="flex rounded-md border border-edge p-0.5" role="group" aria-label="View">
             {([['schematic', 'Schematic'], ['board', '3D board']] as const).map(([mode, label]) => (
               <button
@@ -313,6 +337,9 @@ export default function Page() {
               focusToken={focusToken}
               onSelect={setSelectedId}
               onHover={() => {}}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onDelete={handleDelete}
             />
           ) : (
             <>
@@ -339,9 +366,11 @@ export default function Page() {
 
           <Inspector
             component={selected}
+            components={components}
             nets={nets}
             simulation={simulation}
             onChange={handleChange}
+            onPinState={handlePinState}
             onDelete={handleDelete}
             onClose={() => setSelectedId(null)}
           />

@@ -185,13 +185,31 @@ interface NortonSource { id: string; pin: string; np: number; nn: number; emf: n
  * A board whose GND is not connected delivers nothing, since a source with no
  * return path has no current to give.
  */
+/**
+ * What a pin is assumed to be doing when nothing says. HIGH, unless it shares a
+ * wire with a pin of an earlier board, in which case it listens. The interface
+ * shows this same answer, so what is selected there is what was solved.
+ */
+export function defaultPinState(graph: CircuitGraph, boardId: string, pin: string): PinState {
+  const boards = graph.components.filter((c) => isBoardType(c.type));
+  const order = boards.findIndex((b) => b.id === boardId);
+  const ref = `${boardId}.${pin}`;
+  const net = graph.nets.find((n) => n.pins.includes(ref));
+  const sharesWithEarlierBoard = net?.pins.some((other) => {
+    const owner = other.slice(0, other.lastIndexOf('.'));
+    const at = boards.findIndex((b) => b.id === owner);
+    return owner !== boardId && at >= 0 && at < order;
+  }) ?? false;
+  return sharesWithEarlierBoard ? 'input' : 'high';
+}
+
 export function boardSources(graph: CircuitGraph, node: (pin: string) => number): NortonSource[] {
   const out: NortonSource[] = [];
   const boards = graph.components.filter((c) => isBoardType(c.type));
   const netOfPin = new Map<string, Net>();
   for (const net of graph.nets) for (const pin of net.pins) netOfPin.set(pin, net);
 
-  boards.forEach((board, order) => {
+  boards.forEach((board) => {
     if (!isBoardType(board.type)) return;
     const spec = BOARDS[board.type];
     const nn = node(`${board.id}.GND`);
@@ -210,12 +228,7 @@ export function boardSources(graph: CircuitGraph, node: (pin: string) => number)
       const np = node(ref);
       if (np < 0 || !net || net.pins.length < 2) continue;
 
-      const sharesWithEarlierBoard = net.pins.some((other) => {
-        const owner = other.slice(0, other.lastIndexOf('.'));
-        const at = boards.findIndex((b) => b.id === owner);
-        return owner !== board.id && at >= 0 && at < order;
-      });
-      const state: PinState = board.pin_states?.[pin] ?? (sharesWithEarlierBoard ? 'input' : 'high');
+      const state: PinState = board.pin_states?.[pin] ?? defaultPinState(graph, board.id, pin);
       if (state === 'input') continue;
       out.push({ id: board.id, pin, np, nn, emf: state === 'high' ? spec.logicV : 0, r: spec.gpioRout });
     }

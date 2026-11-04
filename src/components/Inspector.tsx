@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import type { CircuitComponent, ComponentType, Net, Simulation } from '@/lib/types';
+import type { CircuitComponent, ComponentType, Net, PinState, Simulation } from '@/lib/types';
 import { PINS } from '@/lib/types';
+import { BOARDS, isBoardType, isGpio } from '@/lib/circuit/boards';
+import { defaultPinState } from '@/lib/circuit/solve';
 import { fmtA, fmtV, fmtW, formatValue, parseValue } from '@/lib/circuit/units';
 
 /**
@@ -31,6 +33,8 @@ const TYPE_OPTIONS: Array<{ value: ComponentType; label: string }> = [
   { value: 'buzzer', label: 'Buzzer' },
   { value: 'motor', label: 'Motor' },
   { value: 'header', label: 'Header pins' },
+  { value: 'arduino_uno', label: 'Arduino Uno' },
+  { value: 'raspberry_pi', label: 'Raspberry Pi' },
   { value: 'junction', label: 'Junction' },
   { value: 'unknown', label: 'Unknown' },
 ];
@@ -49,14 +53,17 @@ const VALUE_HINT: Partial<Record<ComponentType, { label: string; placeholder: st
 
 interface Props {
   component: CircuitComponent | null;
+  /** Every part, because what a pin defaults to depends on the other boards. */
+  components: CircuitComponent[];
   nets: Net[];
   simulation: Simulation | null;
   onChange: (id: string, patch: Partial<CircuitComponent>) => void;
+  onPinState: (id: string, pin: string, state: PinState) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 }
 
-export default function Inspector({ component, nets, simulation, onChange, onDelete, onClose }: Props) {
+export default function Inspector({ component, components, nets, simulation, onChange, onPinState, onDelete, onClose }: Props) {
   const [draft, setDraft] = useState(component?.value ?? '');
   // React's documented way to reset state when a prop changes: compare against
   // what we last rendered and adjust during render, rather than in an effect
@@ -82,12 +89,17 @@ export default function Inspector({ component, nets, simulation, onChange, onDel
 
   const result = simulation?.component_results[component.id];
   const hint = VALUE_HINT[component.type];
-  const connections = PINS[component.type].map((pin) => {
-    const ref = `${component.id}.${pin}`;
-    const net = nets.find((n) => n.pins.includes(ref));
-    const others = net?.pins.filter((p) => p !== ref) ?? [];
-    return { pin, net, others };
-  });
+  const board = isBoardType(component.type) ? BOARDS[component.type] : null;
+  const connections = PINS[component.type]
+    .map((pin) => {
+      const ref = `${component.id}.${pin}`;
+      const net = nets.find((n) => n.pins.includes(ref));
+      const others = net?.pins.filter((p) => p !== ref) ?? [];
+      return { pin, net, others };
+    })
+    // A board has dozens of pins and most are meant to be unused, so only the ones
+    // in use are listed; the rest would be a wall of "not connected".
+    .filter((row) => !board || (row.net && row.others.length > 0));
 
   const commit = () => {
     const next = draft.trim();
@@ -181,7 +193,17 @@ export default function Inspector({ component, nets, simulation, onChange, onDel
           </div>
         )}
 
-        {result && simulation?.status === 'ok' && (
+        {board && simulation?.status === 'ok' && (
+          <BoardPins
+            component={component}
+            components={components}
+            nets={nets}
+            simulation={simulation}
+            onPinState={onPinState}
+          />
+        )}
+
+        {!board && result && simulation?.status === 'ok' && (
           <div>
             <span className="text-[11px] uppercase tracking-wider text-faint">Operating point</span>
             <dl className="mt-1.5 grid grid-cols-3 gap-2">
@@ -235,6 +257,81 @@ export default function Inspector({ component, nets, simulation, onChange, onDel
           Remove {component.id} from the circuit
         </button>
       </div>
+    </div>
+  );
+}
+
+const STATES: Array<[PinState, string]> = [['high', 'High'], ['low', 'Low'], ['input', 'Input']];
+
+/**
+ * What each wired pin of a board is doing.
+ *
+ * What a pin is doing is set by firmware, which a sketch cannot show, so it is
+ * assumed and the assumption is editable here. Each pin shows the current it is
+ * delivering, because "will this damage the pin" is the question being asked.
+ */
+function BoardPins({
+  component, components, nets, simulation, onPinState,
+}: {
+  component: CircuitComponent;
+  components: CircuitComponent[];
+  nets: Net[];
+  simulation: Simulation;
+  onPinState: (id: string, pin: string, state: PinState) => void;
+}) {
+  if (!isBoardType(component.type)) return null;
+  const spec = BOARDS[component.type];
+  const wired = component.pins.filter((pin) => {
+    const net = nets.find((n) => n.pins.includes(`${component.id}.${pin}`));
+    return net && net.pins.length > 1;
+  });
+  const gpio = wired.filter((pin) => isGpio(component.type as 'arduino_uno', pin));
+  const power = wired.filter((pin) => pin in spec.power);
+
+  if (gpio.length === 0 && power.length === 0) return null;
+  const amps = (pin: string) => Math.abs(simulation.pin_currents?.[`${component.id}.${pin}`] ?? 0);
+
+  return (
+    <div>
+      <span className="text-[11px] uppercase tracking-wider text-faint">Pins in use</span>
+      <ul className="mt-1.5 space-y-2">
+        {power.map((pin) => (
+          <li key={pin} className="flex items-center gap-2 text-[12px]">
+            <span className="w-14 shrink-0 font-mono text-dim">{pin}</span>
+            <span className="text-faint">supply</span>
+            <span className="ml-auto font-mono text-ink">{fmtA(amps(pin))}</span>
+          </li>
+        ))}
+        {gpio.map((pin) => {
+          const explicit = component.pin_states?.[pin];
+          const state = explicit ?? defaultPinState({ components, nets }, component.id, pin);
+          const driven = state !== 'input';
+          return (
+            <li key={pin} className="text-[12px]">
+              <div className="flex items-center gap-2">
+                <span className="w-14 shrink-0 font-mono text-dim">{pin}</span>
+                <div className="flex rounded-md border border-edge p-0.5" role="group" aria-label={`${pin} state`}>
+                  {STATES.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => onPinState(component.id, pin, value)}
+                      aria-pressed={state === value}
+                      className={`h-8 min-w-12 rounded px-2 transition ${
+                        state === value ? 'bg-accent/15 text-accent' : 'text-faint hover:text-ink'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span className="ml-auto font-mono text-ink">{driven ? fmtA(amps(pin)) : '—'}</span>
+              </div>
+              {!explicit && <p className="ml-16 mt-0.5 text-[11px] text-faint">assumed</p>}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
