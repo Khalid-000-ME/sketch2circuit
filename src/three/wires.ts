@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import type { Net } from '@/lib/types';
 import * as M from './materials';
+import { planNets, TUBE_R, type Obstacle } from './plan';
 
 export interface WireSegment {
   netId: string;
@@ -29,8 +30,6 @@ export interface RoutedNet {
   colour: number;
 }
 
-const TUBE_R = 0.045;
-const LIFT = 0.42;
 /** Dashes per world unit along a wire, so flow density is the same everywhere. */
 const DASHES_PER_UNIT = 1.6;
 
@@ -60,22 +59,6 @@ function getDashTexture(): THREE.CanvasTexture {
   dashTexture.wrapS = THREE.RepeatWrapping;
   dashTexture.wrapT = THREE.ClampToEdgeWrapping;
   return dashTexture;
-}
-
-/** An arc from a to b, lifted off the board in the middle. */
-function arc(a: THREE.Vector3, b: THREE.Vector3): THREE.CatmullRomCurve3 {
-  const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-  const span = a.distanceTo(b);
-  const lift = Math.min(LIFT + span * 0.06, 1.1);
-  const q1 = new THREE.Vector3().lerpVectors(a, b, 0.22).setY(lift * 0.85);
-  const q2 = new THREE.Vector3().lerpVectors(a, b, 0.78).setY(lift * 0.85);
-  mid.y = lift;
-  return new THREE.CatmullRomCurve3(
-    [a.clone(), q1, mid, q2, b.clone()],
-    false,
-    'catmullrom',
-    0.4,
-  );
 }
 
 function tube(curve: THREE.Curve<THREE.Vector3>, colour: number): THREE.Mesh {
@@ -120,48 +103,36 @@ export function routeNets(
   pinPositions: Map<string, THREE.Vector3>,
   positivePins: Set<string>,
   groundPins: Set<string> = new Set(),
+  obstacles: Obstacle[] = [],
 ): { routed: RoutedNet[]; group: THREE.Group } {
   const group = new THREE.Group();
   group.name = 'wires';
   const routed: RoutedNet[] = [];
+  const byId = new Map(nets.map((n) => [n.id, n]));
 
-  for (const net of nets) {
-    const points = net.pins
-      .map((ref) => ({ ref, p: pinPositions.get(ref) }))
-      .filter((x): x is { ref: string; p: THREE.Vector3 } => x.p != null);
-    if (points.length < 2) continue;
-
+  for (const plan of planNets(nets, pinPositions, obstacles)) {
+    const net = byId.get(plan.netId)!;
     const colour = netColour(net, positivePins, groundPins);
     const segments: WireSegment[] = [];
-    let hub: THREE.Vector3 | null = null;
     let blob: THREE.Mesh | undefined;
 
-    const addSegment = (curve: THREE.CatmullRomCurve3) => {
-      const length = curve.getLength();
-      const mesh = tube(curve, colour);
+    for (const w of plan.wires) {
+      const length = w.curve.getLength();
+      const mesh = tube(w.curve, colour);
       mesh.userData.netId = net.id;
-      const flow = flowTube(curve, length);
+      const flow = flowTube(w.curve, length);
       flow.userData.netId = net.id;
       group.add(mesh);
       group.add(flow);
-      segments.push({ netId: net.id, mesh, flow, curve, length });
-    };
-
-    if (points.length === 2) {
-      addSegment(arc(points[0].p, points[1].p));
-    } else {
-      hub = new THREE.Vector3();
-      for (const { p } of points) hub.add(p);
-      hub.divideScalar(points.length).setY(LIFT * 0.9);
-
-      for (const { p } of points) addSegment(arc(p, hub));
+      segments.push({ netId: net.id, mesh, flow, curve: w.curve, length });
+    }
+    if (plan.hub) {
       blob = new THREE.Mesh(new THREE.SphereGeometry(TUBE_R * 2.1, 14, 10), M.sheath(colour));
-      blob.position.copy(hub);
+      blob.position.copy(plan.hub);
       blob.userData.netId = net.id;
       group.add(blob);
     }
-
-    routed.push({ netId: net.id, segments, hub, blob, colour });
+    routed.push({ netId: net.id, segments, hub: plan.hub, blob, colour });
   }
 
   return { routed, group };

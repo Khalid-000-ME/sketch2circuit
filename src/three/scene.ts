@@ -129,9 +129,12 @@ export class CircuitScene {
       builtById.set(c.id, built);
       measure.setFromObject(built.group);
       const size = measure.getSize(new THREE.Vector3());
+      const middle = measure.getCenter(new THREE.Vector3());
       extents.set(c.id, {
         halfX: Math.max(size.x / 2, 0.2),
         halfZ: Math.max(size.z / 2, 0.2),
+        cx: middle.x,
+        cz: middle.z,
       });
     }
 
@@ -182,7 +185,12 @@ export class CircuitScene {
         groundPins.add(`${c.id}.GND`);
       }
     }
-    const { routed, group } = routeNets(nets, this.pinPositions, positivePins, groundPins);
+    const obstacles = components.map((c) => {
+      const g = builtById.get(c.id)!.group;
+      g.updateMatrixWorld(true);
+      return { id: c.id, box: new THREE.Box3().setFromObject(g) };
+    });
+    const { routed, group } = routeNets(nets, this.pinPositions, positivePins, groundPins, obstacles);
     this.routed = routed;
     this.wireGroup = group;
     this.root.add(group);
