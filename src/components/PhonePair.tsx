@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import QRCode from 'qrcode';
 
 interface Props {
   /** Called once with the photo when it arrives from the phone. */
@@ -66,6 +65,8 @@ export default function PhonePair({ onImage }: Props) {
       const body = (await res.json()) as { token: string; url: string; reachable: boolean };
       // Light modules on a white square: phone cameras read that far more reliably
       // than the same code inverted onto this app's dark background.
+      // Loaded now, not at page load: most visitors never open this panel.
+      const QRCode = (await import('qrcode')).default;
       const svg = await QRCode.toString(body.url, {
         type: 'svg', margin: 2, errorCorrectionLevel: 'M',
         color: { dark: '#07090d', light: '#ffffff' },
