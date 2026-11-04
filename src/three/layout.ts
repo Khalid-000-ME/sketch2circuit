@@ -32,10 +32,17 @@ export interface Placement {
   extent: Extent;
 }
 
+/** Where a person put a part: kept exactly, and never moved by the layout. */
+export interface Manual {
+  x: number;
+  z: number;
+  rot: number;
+}
+
 export interface LayoutResult {
   placements: Map<string, Placement>;
-  /** Board extent, with a margin. */
-  board: { width: number; depth: number };
+  /** Board extent, with a margin, and where its middle is. */
+  board: { width: number; depth: number; cx: number; cz: number };
 }
 
 const GRID = 0.254 * 2;
@@ -60,13 +67,17 @@ export function layoutCircuit(
   components: CircuitComponent[],
   nets: Net[],
   extents: Map<string, Extent>,
+  manual: Map<string, Manual> = new Map(),
 ): LayoutResult {
   const ids = components.map((c) => c.id);
   const index = new Map(ids.map((id, i) => [id, i]));
   const n = ids.length;
   const rand = seeded(ids.join('|'));
 
-  const pos = ids.map((_, i) => {
+  const isFixed = ids.map((id) => manual.has(id));
+  const pos = ids.map((id, i) => {
+    const m = manual.get(id);
+    if (m) return new THREE.Vector2(m.x, m.z);
     // Seeded ring start: no two components coincide, and the result is stable.
     const a = (i / Math.max(1, n)) * Math.PI * 2;
     const r = 3 + rand() * 1.5;
@@ -122,6 +133,8 @@ export function layoutCircuit(
     for (let i = 0; i < n; i++) force[i].addScaledVector(pos[i], -0.012);
 
     for (let i = 0; i < n; i++) {
+      // A part the person placed stays where they put it; the rest arrange around it.
+      if (isFixed[i]) continue;
       const f = force[i];
       const cap = 0.6 * cooling + 0.02;
       if (f.length() > cap) f.setLength(cap);
@@ -164,10 +177,11 @@ export function layoutCircuit(
         if (dir.lengthSq() > 1e-6) rotationY = -Math.atan2(dir.y, dir.x);
       }
     }
-    const snapped = new THREE.Vector2(
-      Math.round(pos[i].x / GRID) * GRID,
-      Math.round(pos[i].y / GRID) * GRID,
-    );
+    const m = manual.get(c.id);
+    if (m) rotationY = m.rot;
+    const snapped = m
+      ? new THREE.Vector2(m.x, m.z)
+      : new THREE.Vector2(Math.round(pos[i].x / GRID) * GRID, Math.round(pos[i].y / GRID) * GRID);
     placements.set(c.id, {
       id: c.id,
       position: new THREE.Vector3(snapped.x, 0, snapped.y),
@@ -176,7 +190,8 @@ export function layoutCircuit(
     });
   });
 
-  separate(placements);
+  if (manual.size > 0) settleNewcomers(components, nets, placements, manual);
+  separate(placements, new Set(manual.keys()));
 
   // Recentre on the content: the relaxation drifts, and a board whose parts sit
   // in one corner reads as a mistake even when the topology is right.
@@ -195,9 +210,15 @@ export function layoutCircuit(
   }
   const centreX = (bounds.minX + bounds.maxX) / 2;
   const centreZ = (bounds.minZ + bounds.maxZ) / 2;
-  for (const p of placements.values()) {
-    p.position.x -= centreX;
-    p.position.z -= centreZ;
+  // With nothing placed by hand the content is centred on the board. Once a part
+  // has been placed, moving everything would move it too, so the board moves to
+  // the content instead.
+  const recentre = manual.size === 0;
+  if (recentre) {
+    for (const p of placements.values()) {
+      p.position.x -= centreX;
+      p.position.z -= centreZ;
+    }
   }
 
   const MARGIN = 1.15;
@@ -206,6 +227,8 @@ export function layoutCircuit(
     board: {
       width: Math.max(4, bounds.maxX - bounds.minX + MARGIN * 2),
       depth: Math.max(3.5, bounds.maxZ - bounds.minZ + MARGIN * 2),
+      cx: recentre ? 0 : centreX,
+      cz: recentre ? 0 : centreZ,
     },
   };
 }
@@ -223,6 +246,10 @@ export function pinWorldPosition(
 const GAP = 0.4;
 
 /** Half-extents of a part's footprint once it is turned. */
+export function footprintAt(extent: Extent, rotationY: number, x: number, z: number) {
+  return footprint({ id: '', position: new THREE.Vector3(x, 0, z), rotationY, extent });
+}
+
 function footprint(p: Placement) {
   const c = Math.abs(Math.cos(p.rotationY));
   const s = Math.abs(Math.sin(p.rotationY));
@@ -249,9 +276,10 @@ function footprint(p: Placement) {
  * along whichever axis frees them with the least travel, and snaps back to the
  * grid after each pass so the board still reads as a board.
  */
-function separate(placements: Map<string, Placement>) {
+function separate(placements: Map<string, Placement>, immobile: Set<string>) {
   const list = [...placements.values()];
   for (const p of list) {
+    if (immobile.has(p.id)) continue;
     p.position.x = Math.round(p.position.x / GRID) * GRID;
     p.position.z = Math.round(p.position.z / GRID) * GRID;
   }
@@ -266,16 +294,72 @@ function separate(placements: Map<string, Placement>) {
         const ox = fa.dx + fb.dx + GAP - Math.abs(fa.mx - fb.mx);
         const oz = fa.dz + fb.dz + GAP - Math.abs(fa.mz - fb.mz);
         if (ox <= 0 || oz <= 0) continue;
+        const fa0 = immobile.has(a.id), fb0 = immobile.has(b.id);
+        if (fa0 && fb0) continue;
         moved = true;
         const axis = ox < oz ? 'x' : 'z';
         // Whole grid steps, so a pushed part is still on the grid and nothing has
         // to be rounded back into its neighbour afterwards.
         const push = Math.ceil((axis === 'x' ? ox : oz) / 2 / GRID) * GRID;
         const sign = (axis === 'x' ? fa.mx <= fb.mx : fa.mz <= fb.mz) ? -1 : 1;
-        a.position[axis] += sign * push;
-        b.position[axis] -= sign * push;
+        // A part that cannot move is not asked to: the other takes the whole push.
+        if (fa0) b.position[axis] -= sign * push * 2;
+        else if (fb0) a.position[axis] += sign * push * 2;
+        else { a.position[axis] += sign * push; b.position[axis] -= sign * push; }
       }
     }
     if (!moved) break;
+  }
+}
+
+/**
+ * Where a part added after others were placed by hand goes.
+ *
+ * The relaxation has no good answer here: with the rest held still it pushes the
+ * newcomer far off to be clear of everything. It is put instead at the free grid
+ * spot nearest to whatever it is connected to, or the middle of the board when it
+ * is connected to nothing yet.
+ */
+function settleNewcomers(
+  components: CircuitComponent[], nets: Net[],
+  placements: Map<string, Placement>, manual: Map<string, Manual>,
+) {
+  const placed = new Set(manual.keys());
+  const taken = (p: Placement, x: number, z: number) => {
+    const a = footprintAt(p.extent, p.rotationY, x, z);
+    for (const other of placements.values()) {
+      if (other.id === p.id || !placed.has(other.id)) continue;
+      const b = footprint(other);
+      if (a.dx + b.dx + GAP > Math.abs(a.mx - b.mx) && a.dz + b.dz + GAP > Math.abs(a.mz - b.mz)) return true;
+    }
+    return false;
+  };
+
+  for (const c of components) {
+    if (manual.has(c.id)) continue;
+    const mine = placements.get(c.id);
+    if (!mine) continue;
+    const friends = nets
+      .filter((n) => n.pins.some((pin) => pin.startsWith(`${c.id}.`)))
+      .flatMap((n) => n.pins.map((pin) => pin.slice(0, pin.lastIndexOf('.'))))
+      .filter((id) => id !== c.id && placed.has(id));
+    const anchors = (friends.length ? friends : [...placed]).map((id) => placements.get(id)!.position);
+    const cx = anchors.reduce((a, p) => a + p.x, 0) / Math.max(1, anchors.length);
+    const cz = anchors.reduce((a, p) => a + p.z, 0) / Math.max(1, anchors.length);
+    const gx = Math.round(cx / GRID) * GRID;
+    const gz = Math.round(cz / GRID) * GRID;
+
+    let best: { x: number; z: number } | null = null;
+    for (let r = 0; r <= 60 && !best; r++) {
+      for (let dx = -r; dx <= r && !best; dx++) {
+        for (let dz = -r; dz <= r && !best; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const x = gx + dx * GRID, z = gz + dz * GRID;
+          if (!taken(mine, x, z)) best = { x, z };
+        }
+      }
+    }
+    if (best) mine.position.set(best.x, 0, best.z);
+    placed.add(c.id);
   }
 }

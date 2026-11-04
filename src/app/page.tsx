@@ -15,12 +15,15 @@ import {
 } from '@/lib/client/api';
 import { connectPins, disconnectPin, makeComponent, removePart, type PartKind } from '@/lib/circuit/edit';
 import type { AnalyzeResponse, CircuitComponent, Net, PinState } from '@/lib/types';
+import type { Manual } from '@/three/layout';
 
 /**
  * The 3D view pulls in three.js, which was half of everything a first visit
  * downloaded, for a view that is not the default. It is fetched when someone
  * opens it, and the placeholder holds the space so nothing jumps.
  */
+const EMPTY_PLACEMENTS: Record<string, Manual> = {};
+
 const Viewer = dynamic(() => import('@/components/Viewer'), {
   ssr: false,
   loading: () => <div className="flex h-full items-center justify-center text-[12px] text-faint">Loading 3D view…</div>,
@@ -59,6 +62,8 @@ export default function Page() {
   const [stage, setStage] = useState(0);
   const [resimulating, setResimulating] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('schematic');
+  // Where parts were put in the 3D view, for the analysis they were put in.
+  const [placed, setPlaced] = useState<{ circuit: string; map: Record<string, Manual> }>({ circuit: '', map: {} });
 
   const abortRef = useRef<AbortController | null>(null);
   const editSeq = useRef(0);
@@ -371,9 +376,14 @@ export default function Page() {
                 focusToken={focusToken}
                 onSelect={setSelectedId}
                 onHover={() => {}}
+                placements={placed.circuit === (result?.circuit_id ?? 'none') ? placed.map : EMPTY_PLACEMENTS}
+                onPlace={(map) => setPlaced({ circuit: result?.circuit_id ?? 'none', map })}
+                onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
+                onDelete={handleDelete}
               />
-              <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-faint">
-                Drag to orbit · pinch or scroll to zoom · tap a component
+              <p className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 px-4 text-center text-[11px] text-faint">
+                Drag a part to move it · click a pin, then another, to wire · click a wire to remove it · drag empty space to orbit
               </p>
             </>
           )}

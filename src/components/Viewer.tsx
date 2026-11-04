@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CircuitComponent, Finding, Net, Simulation } from '@/lib/types';
-import { CircuitScene } from '@/three/scene';
+import { CircuitScene, type WireSel } from '@/three/scene';
+import type { Manual } from '@/three/layout';
+import { isBoardType } from '@/lib/circuit/boards';
 
 interface Props {
   /** Changes when a new photo is analysed. Edits keep the same id. */
@@ -16,7 +18,17 @@ interface Props {
   focusToken: number;
   onSelect: (id: string | null) => void;
   onHover: (id: string | null) => void;
+  /** Where the person has put parts, so edits do not shuffle them. */
+  placements: Record<string, Manual>;
+  onPlace: (all: Record<string, Manual>) => void;
+  onConnect: (a: string, b: string) => void;
+  onDisconnect: (pin: string) => void;
+  onDelete: (id: string) => void;
 }
+
+/** A key press that belongs to a form field is not ours. */
+const typing = (target: EventTarget | null) =>
+  target instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName);
 
 /**
  * Whether the browser can give us a WebGL context at all (NFR-12).
@@ -42,11 +54,18 @@ const subscribeNever = () => () => {};
 
 export default function Viewer({
   circuitId, components, nets, simulation, findings, selectedId, focusToken, onSelect, onHover,
+  placements, onPlace, onConnect, onDisconnect, onDelete,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<CircuitScene | null>(null);
   const animatedCircuit = useRef<string | null>(null);
   const supported = useSyncExternalStore<boolean | null>(subscribeNever, webglAvailable, () => null);
+  const [wire, setWire] = useState<WireSel | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  // The scene is built once and outlives renders, so it reaches the latest
+  // handlers through a ref rather than closing over the first ones.
+  const live = useRef({ onSelect, onHover, onPlace, onConnect });
+  useEffect(() => { live.current = { onSelect, onHover, onPlace, onConnect }; });
   // The structural signature of the circuit: a change here rebuilds the scene,
   // while a value edit only re-runs the solver and leaves the geometry alone.
   const topology = JSON.stringify([
@@ -57,10 +76,16 @@ export default function Viewer({
   useEffect(() => {
     if (!supported || !canvasRef.current || sceneRef.current) return;
     const scene = new CircuitScene(canvasRef.current, {
-      onSelect,
-      onHover,
+      onSelect: (id) => live.current.onSelect(id),
+      onHover: (id) => live.current.onHover(id),
+      onPlace: (all) => live.current.onPlace(all),
+      onConnect: (a, b) => live.current.onConnect(a, b),
+      onSelectWire: setWire,
+      onPending: setPending,
     });
     sceneRef.current = scene;
+    // A hook for the browser tests, and only when asked for.
+    if (window.location.search.includes('e2e')) (window as unknown as { __scene3d?: CircuitScene }).__scene3d = scene;
     const onResize = () => scene.resize();
     window.addEventListener('resize', onResize);
     const observer = new ResizeObserver(onResize);
@@ -71,9 +96,8 @@ export default function Viewer({
       scene.dispose();
       sceneRef.current = null;
     };
-    // The callbacks are stable for the lifetime of the page; rebuilding the whole
-    // renderer when a parent re-renders would restart the assembly animation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Handlers are reached through `live`, so a parent re-render never rebuilds
+    // the renderer and restarts the assembly animation.
   }, [supported]);
 
   // `supported` is in the dependency list because the scene is created in the
@@ -87,7 +111,7 @@ export default function Viewer({
     // 220Ω one — but it must not replay the assembly animation.
     const firstBuild = animatedCircuit.current !== circuitId;
     animatedCircuit.current = circuitId;
-    scene.setCircuit(components, nets, simulation, firstBuild);
+    scene.setCircuit(components, nets, simulation, firstBuild, placements);
     if (selectedId) scene.select(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topology, circuitId, supported]);
@@ -111,11 +135,23 @@ export default function Viewer({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onSelect(null);
+      if (typing(e.target)) return;
+      const scene = sceneRef.current;
+      if (e.key === 'Escape') {
+        scene?.cancelInteraction();
+        onSelect(null);
+      } else if ((e.key === 'r' || e.key === 'R') && selectedId && !e.metaKey && !e.ctrlKey) {
+        scene?.rotateSelected();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (wire) { e.preventDefault(); onDisconnect(wire.pins[0]); setWire(null); }
+        else if (selectedId) { e.preventDefault(); onDelete(selectedId); }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onSelect]);
+  }, [onSelect, onDelete, onDisconnect, selectedId, wire]);
+
+  const selected = components.find((c) => c.id === selectedId) ?? null;
 
   if (supported === false) {
     return (
@@ -137,6 +173,44 @@ export default function Viewer({
         className="h-full w-full touch-none"
         aria-label="Three-dimensional view of the recovered circuit. Use the component list to inspect parts without a pointer."
       />
+
+      {pending ? (
+        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-warn/50 bg-panel/90 px-3 py-2 text-[12px] text-ink backdrop-blur">
+          <span>Wiring from <span className="font-mono text-warn">{pending}</span>. Click another pin.</span>
+          <button type="button" onClick={() => sceneRef.current?.cancelInteraction()} className="rounded border border-edge px-2 py-1 text-dim transition hover:text-ink">Cancel</button>
+        </div>
+      ) : wire ? (
+        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-edge bg-panel/90 px-3 py-2 text-[12px] backdrop-blur">
+          <span className="font-mono text-accent">{wire.pins[0]}{wire.pins[1] ? ` – ${wire.pins[1]}` : ''}</span>
+          <button
+            type="button"
+            onClick={() => { onDisconnect(wire.pins[0]); setWire(null); }}
+            className="rounded border border-edge px-2 py-1 text-dim transition hover:border-error/50 hover:text-error"
+          >
+            {wire.pins[1] ? 'Remove wire' : 'Disconnect pin'} <kbd className="ml-1 text-faint">Del</kbd>
+          </button>
+        </div>
+      ) : selected ? (
+        <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-edge bg-panel/90 px-3 py-2 text-[12px] backdrop-blur">
+          <span className="font-mono text-accent">{selected.id}</span>
+          {!isBoardType(selected.type) && (
+            <button
+              type="button"
+              onClick={() => sceneRef.current?.rotateSelected()}
+              className="rounded border border-edge px-2 py-1 text-dim transition hover:border-accent/50 hover:text-ink"
+            >
+              Rotate <kbd className="ml-1 text-faint">R</kbd>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onDelete(selected.id)}
+            className="rounded border border-edge px-2 py-1 text-dim transition hover:border-error/50 hover:text-error"
+          >
+            Delete <kbd className="ml-1 text-faint">Del</kbd>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

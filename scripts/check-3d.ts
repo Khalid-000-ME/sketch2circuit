@@ -87,5 +87,44 @@ for (const [name, graph] of Object.entries(cases)) {
   failures += problems.length;
   console.log(`${problems.length ? 'FAIL' : 'ok  '} ${name}${problems.length ? '\n  ' + [...new Set(problems)].join('\n  ') : ''}`);
 }
+// A part added after the others were placed by hand must land beside them, not
+// clear across the board, and must not sit on anything.
+for (const [name, graph] of Object.entries(cases)) {
+  const { components, nets } = canonicalise(graph);
+  const built = new Map(components.map((c) => [c.id, buildComponent(c)]));
+  const extents = new Map<string, Extent>();
+  for (const c of components) {
+    const box = new THREE.Box3().setFromObject(built.get(c.id)!.group);
+    const size = box.getSize(new THREE.Vector3());
+    const mid = box.getCenter(new THREE.Vector3());
+    extents.set(c.id, { halfX: Math.max(size.x / 2, 0.2), halfZ: Math.max(size.z / 2, 0.2), cx: mid.x, cz: mid.z });
+  }
+  const first = layoutCircuit(components, nets, extents);
+  // Everything but the last part is held where the first layout put it.
+  const last = components[components.length - 1].id;
+  const manual = new Map([...first.placements].filter(([id]) => id !== last).map(([id, p]) => [id, { x: p.position.x, z: p.position.z, rot: p.rotationY }]));
+  const second = layoutCircuit(components, nets, extents, manual);
+  const problems: string[] = [];
+  const boxes = components.map((c) => {
+    const b = built.get(c.id)!;
+    const pl = second.placements.get(c.id)!;
+    b.group.position.copy(pl.position);
+    b.group.rotation.y = pl.rotationY;
+    b.group.updateMatrixWorld(true);
+    return { id: c.id, box: new THREE.Box3().setFromObject(b.group) };
+  });
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    if (boxes[i].box.intersectsBox(boxes[j].box)) problems.push(`${boxes[i].id} and ${boxes[j].id} overlap`);
+  }
+  for (const [id, m] of manual) {
+    const p = second.placements.get(id)!;
+    if (Math.hypot(p.position.x - m.x, p.position.z - m.z) > 1e-9) problems.push(`${id} was moved though it was placed by hand`);
+  }
+  const lastAt = second.placements.get(last)!.position;
+  const nearest = Math.min(...[...manual.keys()].map((id) => Math.hypot(second.placements.get(id)!.position.x - lastAt.x, second.placements.get(id)!.position.z - lastAt.z)));
+  if (components.length > 1 && nearest > 9) problems.push(`${last} landed ${nearest.toFixed(1)} units from the nearest part`);
+  failures += problems.length;
+  console.log(`${problems.length ? 'FAIL' : 'ok  '} added-part ${name}${problems.length ? '\n  ' + problems.join('\n  ') : ''}`);
+}
 if (failures) { console.log(`\n${failures} problem(s)`); process.exit(1); }
 console.log('\n3D geometry clean');

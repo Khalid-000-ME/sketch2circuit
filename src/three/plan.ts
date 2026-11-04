@@ -32,8 +32,10 @@ export interface Obstacle {
 export interface PlannedWire {
   netId: string;
   curve: THREE.CatmullRomCurve3;
-  /** Pins this wire ends on, as component ids; empty for a hub end. */
+  /** Components this wire ends on; null for a hub end. */
   ends: [string | null, string | null];
+  /** Pin references at its two ends; the second is null at a hub. */
+  pins: [string, string | null];
 }
 
 export interface PlannedNet {
@@ -108,6 +110,7 @@ interface Job {
   a: THREE.Vector3;
   b: THREE.Vector3;
   ends: [string | null, string | null];
+  pins: [string, string | null];
 }
 
 /**
@@ -164,12 +167,12 @@ export function planNets(
 
   for (const net of nets) {
     const pts = net.pins
-      .map((ref) => ({ comp: ref.split('.')[0], p: pinPositions.get(ref) }))
-      .filter((x): x is { comp: string; p: THREE.Vector3 } => x.p != null);
+      .map((ref) => ({ ref, comp: ref.split('.')[0], p: pinPositions.get(ref) }))
+      .filter((x): x is { ref: string; comp: string; p: THREE.Vector3 } => x.p != null);
     if (pts.length < 2) continue;
 
     if (pts.length === 2) {
-      shells.push({ netId: net.id, hub: null, jobs: [{ netId: net.id, a: pts[0].p, b: pts[1].p, ends: [pts[0].comp, pts[1].comp] }] });
+      shells.push({ netId: net.id, hub: null, jobs: [{ netId: net.id, a: pts[0].p, b: pts[1].p, ends: [pts[0].comp, pts[1].comp], pins: [pts[0].ref, pts[1].ref] }] });
       continue;
     }
 
@@ -185,7 +188,7 @@ export function planNets(
     shells.push({
       netId: net.id,
       hub,
-      jobs: pts.map(({ comp, p }) => ({ netId: net.id, a: p, b: hub, ends: [comp, null] as [string, null] })),
+      jobs: pts.map(({ ref, comp, p }) => ({ netId: net.id, a: p, b: hub, ends: [comp, null] as [string, null], pins: [ref, null] as [string, null] })),
     });
   }
 
@@ -203,6 +206,6 @@ export function planNets(
   return shells.map((s) => ({
     netId: s.netId,
     hub: s.hub,
-    wires: s.jobs.map((j) => ({ netId: s.netId, curve: best.curves.get(j)!, ends: j.ends })),
+    wires: s.jobs.map((j) => ({ netId: s.netId, curve: best.curves.get(j)!, ends: j.ends, pins: j.pins })),
   }));
 }

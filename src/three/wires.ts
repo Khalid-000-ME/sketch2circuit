@@ -120,6 +120,8 @@ export function routeNets(
       const length = w.curve.getLength();
       const mesh = tube(w.curve, colour);
       mesh.userData.netId = net.id;
+      // What picking needs to say which wire was clicked.
+      mesh.userData.wirePins = w.pins;
       const flow = flowTube(w.curve, length);
       flow.userData.netId = net.id;
       group.add(mesh);
