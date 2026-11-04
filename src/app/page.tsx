@@ -96,6 +96,11 @@ export default function Page() {
     }
   }, [runAnalysis]);
 
+  /** A photo sent from a paired phone goes through exactly the path an upload does. */
+  const handlePhoneImage = useCallback(async (blob: Blob) => {
+    await runAnalysis(blob, URL.createObjectURL(blob));
+  }, [runAnalysis]);
+
   const handleSample = useCallback(async (sample: SampleInfo) => {
     try {
       const res = await fetch(sample.image);
@@ -216,6 +221,7 @@ export default function Page() {
             error={error}
             onFile={handleFile}
             onSample={handleSample}
+            onPhoneImage={handlePhoneImage}
           />
         )}
       </main>

@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useRef, useState } from 'react';
 import type { SampleInfo } from '@/lib/client/api';
+import PhonePair from './PhonePair';
 
 /**
  * The capture screen: upload, drag-and-drop, camera, and three bundled sketches.
@@ -19,9 +20,11 @@ interface Props {
   error: string | null;
   onFile: (file: File) => void;
   onSample: (sample: SampleInfo) => void;
+  /** A photo that arrived from a paired phone. */
+  onPhoneImage: (blob: Blob) => void;
 }
 
-export default function Capture({ samples, live, busy, error, onFile, onSample }: Props) {
+export default function Capture({ samples, live, busy, error, onFile, onSample, onPhoneImage }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -97,6 +100,8 @@ export default function Capture({ samples, live, busy, error, onFile, onSample }
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
+
+      <PhonePair onImage={onPhoneImage} />
 
       {error && (
         <p role="alert" className="fade-up mt-4 rounded-lg border border-error/40 bg-error/[0.08] px-4 py-3 text-[13px] text-error">
