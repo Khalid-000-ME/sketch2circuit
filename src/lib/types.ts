@@ -100,6 +100,12 @@ export interface CircuitGraph {
 
 export interface AnalyzeResponse extends CircuitGraph {
   circuit_id: string;
+  /**
+   * True when this is a stored result for a bundled sample rather than a fresh
+   * analysis of the image. The interface says so, because a cached circuit that
+   * looks live is a result the person cannot judge correctly.
+   */
+  cached?: boolean;
   confidence: Confidence;
   simulation: Simulation;
   findings: Finding[];

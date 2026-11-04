@@ -270,10 +270,19 @@ export default function Page() {
               </button>
             ))}
           </div>
-          {result?.timings?.total_ms != null && (
-            <span className="hidden text-[11px] text-faint sm:inline">
-              analysed in {(Number(result.timings.total_ms) / 1000).toFixed(1)}s
+          {result?.cached ? (
+            <span
+              className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-[11px] text-warn"
+              title="Live analysis did not finish, so an earlier run of this sample is shown."
+            >
+              Cached result
             </span>
+          ) : (
+            result?.timings?.total_ms != null && (
+              <span className="hidden text-[11px] text-faint sm:inline">
+                analysed in {(Number(result.timings.total_ms) / 1000).toFixed(1)}s
+              </span>
+            )
           )}
           <button
             type="button"

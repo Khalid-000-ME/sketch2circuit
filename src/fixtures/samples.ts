@@ -65,6 +65,7 @@ export function prebakedFor(sampleId: string | null | undefined): AnalyzeRespons
   const analysis = analyseGraph(sample.graph);
   const response: AnalyzeResponse = {
     circuit_id: `c_sample_${sample.id}`,
+    cached: true,
     components: analysis.components,
     nets: analysis.nets,
     confidence: sample.confidence,
