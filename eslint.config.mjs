@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored from the React Bits registry, not written here. It is linted by
+    // its own project, and reformatting it would make the next update a conflict.
+    "src/components/Grainient.jsx",
   ]),
 ]);
 

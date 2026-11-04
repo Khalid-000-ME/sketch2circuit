@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRef, useState } from 'react';
 import type { SampleInfo } from '@/lib/client/api';
 import PhonePair from './PhonePair';
+import Hero from './Hero';
 
 /**
  * The capture screen: upload, drag-and-drop, camera, and three bundled sketches.
@@ -24,9 +25,38 @@ interface Props {
   onPhoneImage: (blob: Blob) => void;
 }
 
+/** The six things that are true of this and not of a drawing tool. */
+const SELLING: Array<{ title: string; body: string }> = [
+  {
+    title: 'It reads your handwriting',
+    body: 'Symbols, values and the wires between them. If you wrote the connections out as a pin table, it reads that too and checks it against what you drew.',
+  },
+  {
+    title: 'It solves the circuit for real',
+    body: 'A nonlinear DC operating point, not a drawing that looks plausible. Hand-checked to within 0.1%.',
+  },
+  {
+    title: 'It tells you why, and the fix',
+    body: 'Not "0.0 V". "D1 has no current-limiting resistor. At 9V it will draw roughly 438mA, about 22x its rating. Add 470 ohms."',
+  },
+  {
+    title: 'It knows board pins',
+    body: 'Arduino Uno and Raspberry Pi, with the real current and voltage limits, so it catches the GPIO pin you are about to damage.',
+  },
+  {
+    title: 'Any part you can describe',
+    body: 'Type "a 5V relay with one normally open contact". It is built from the simulator\u2019s own device models and must pass checks on the solver before you can use it.',
+  },
+  {
+    title: 'Edit it, in 2D or 3D',
+    body: 'Drag parts, draw wires between pins, delete, rotate. Every edit re-solves, so the findings change as the circuit does.',
+  },
+];
+
 export default function Capture({ samples, live, busy, error, onFile, onSample, onPhoneImage }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
   const handleFiles = (list: FileList | null) => {
@@ -35,20 +65,19 @@ export default function Capture({ samples, live, busy, error, onFile, onSample, 
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-5 py-10 sm:py-16">
-      <header className="text-center">
-        <h1 className="text-[clamp(1.9rem,5vw,2.9rem)] font-semibold leading-[1.1] tracking-tight">
-          Photograph your circuit.
-          <br />
-          <span className="text-accent">Find out if it works.</span>
-        </h1>
-        <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-dim">
-          Draw a circuit on paper and take a picture of it. It is identified, rendered in 3D,
-          simulated, and checked — so you know what is wrong before you connect the battery.
-        </p>
-      </header>
+    <div className="w-full">
+      <Hero onStart={() => dropRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+
+      <div className="mx-auto w-full max-w-3xl px-5 py-12 sm:py-16">
+      <h2 className="font-display text-[clamp(1.7rem,4vw,2.3rem)] leading-tight tracking-[-0.01em]">
+        Start with a photo
+      </h2>
+      <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-dim">
+        A phone photo of a notebook page is enough. Nothing is redrawn by hand.
+      </p>
 
       <div
+        ref={dropRef}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
@@ -109,7 +138,7 @@ export default function Capture({ samples, live, busy, error, onFile, onSample, 
         </p>
       )}
 
-      <section className="mt-10">
+      <section id="samples" className="mt-12 scroll-mt-6">
         <div className="flex items-baseline justify-between">
           <h2 className="text-[13px] font-medium uppercase tracking-wider text-faint">
             No paper to hand? Try one of these
@@ -148,12 +177,37 @@ export default function Capture({ samples, live, busy, error, onFile, onSample, 
         </div>
       </section>
 
-      <footer className="mt-10 border-t border-edge pt-5 text-[12px] leading-relaxed text-faint">
-        Components and handwritten values are read by{' '}
-        <span className="text-dim">Muse Spark</span>; the symbols and the drawn wires are segmented
-        by <span className="text-dim">SAM 3.1</span>, and connectivity is recovered by walking the
-        wire mask rather than by guessing. The circuit is then solved with a DC operating-point
-        analysis and checked against a rule suite.
+      </div>
+
+      <section className="border-t border-edge bg-raised/40">
+        <div className="mx-auto w-full max-w-3xl px-5 py-14">
+          <h2 className="font-display text-[clamp(1.7rem,4vw,2.3rem)] leading-tight tracking-[-0.01em]">
+            What it actually does
+          </h2>
+          <div className="mt-8 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+            {SELLING.map(({ title, body }) => (
+              <div key={title}>
+                <h3 className="text-[15px] font-medium text-ink">{title}</h3>
+                <p className="mt-1.5 text-[14px] leading-relaxed text-dim">{body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-edge">
+        <div className="mx-auto w-full max-w-3xl px-5 py-8 text-[12px] leading-relaxed text-faint">
+          <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-dim">
+            Sketch <span aria-hidden>&#8594;</span> Circuit
+          </p>
+          <p className="mt-3">
+            Components and handwritten values are read by <span className="text-dim">Muse Spark</span>;
+            the symbols and the drawn wires are segmented by <span className="text-dim">SAM 3.1</span>,
+            and connectivity is recovered by walking the wire mask rather than by guessing. The circuit
+            is then solved with a DC operating-point analysis and checked against a rule suite.
+          </p>
+          <p className="mt-3">DC only: no transient or AC analysis, and firmware is not simulated.</p>
+        </div>
       </footer>
     </div>
   );
