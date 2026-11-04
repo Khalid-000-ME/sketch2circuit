@@ -21,6 +21,7 @@
 
 import type { CircuitComponent, Net } from '../types';
 import type { SamMask } from '../meta/sam';
+import { isBoardType } from '../circuit/boards';
 
 /** Working resolution for the trace. Big enough for thin pencil lines, cheap to label. */
 const GRID_MAX = 640;
@@ -36,10 +37,21 @@ const DILATE = 2;
 const RAY_FRAC = 0.16;
 /** Fallback isotropic radius, for pins with no meaningful outward direction. */
 const DISC_FRAC = 0.05;
+/** How far past a board's box, in source pixels, a wire still counts as touching it. */
+const BOARD_TOUCH_MARGIN = 18;
+/** How much a hit's distance from the lead's axis counts against it, per pixel. */
+const LATERAL_WEIGHT = 2;
 /** A wire must reach at least this far across the page, as a fraction of it. */
 const MIN_REGION_SPAN_FRAC = 0.05;
-/** A wire fills little of its bounding box. Writing fills a lot of a small one. */
+/** A wire that bends fills little of its bounding box. Writing fills a lot of a small one. */
 const MAX_REGION_FILL = 0.3;
+/**
+ * A straight run is the exception to the rule above: its bounding box is the
+ * line, so it is nearly full. What marks it out is how long it is for its
+ * thickness, which no cluster of letters is. Without this every wire between two
+ * parts was thrown away as handwriting, and only the long bent loop survived.
+ */
+const MIN_ELONGATION = 5;
 
 export interface Grid {
   data: Uint8Array;
@@ -224,7 +236,8 @@ export function wireLikeRegions(
     const h = s.bottom - s.top + 1;
     const span = Math.hypot(w, h);
     const fill = s.pixels / (w * h);
-    ok[label] = span >= minSpan && fill <= MAX_REGION_FILL ? 1 : 0;
+    const elongation = Math.max(w, h) / Math.max(1, Math.min(w, h));
+    ok[label] = span >= minSpan && (fill <= MAX_REGION_FILL || elongation >= MIN_ELONGATION) ? 1 : 0;
   }
   return ok;
 }
@@ -269,6 +282,10 @@ export function labelRegions(grid: Grid): { labels: Int32Array; count: number } 
  */
 export function pinAnchors(c: CircuitComponent): PinAnchor[] {
   if (!c.bbox) return [];
+  // A board has dozens of pins and nothing on the page says where each one is.
+  // The default below would put two of them at the ends of its box, which is a
+  // confident wrong answer; no anchors means the model's reading is used instead.
+  if (isBoardType(c.type)) return [];
   const [x, y, w, h] = c.bbox;
   const cx = x + w / 2;
   const cy = y + h / 2;
@@ -392,7 +409,11 @@ export function buildTraceGrid(
    * set of pixels SAM called this symbol; its bounding box is punched too, to
    * cover any stroke the mask clipped.
    */
-  const punched: Grid = { ...base, data: Uint8Array.from(base.data) };
+  // Closing pencil gaps comes first, so that the hole punched for a symbol is the
+  // last word on that area. Done the other way round, the edge strokes left just
+  // outside a symbol's box regrow into the margin and form regions of their own,
+  // which a lead then mistakes for the wire it is looking for.
+  const punched: Grid = dilate({ ...base, data: Uint8Array.from(base.data) }, DILATE);
   for (const c of components) {
     if (c.type === 'junction') continue;
     const mask = componentMasks.get(c.id);
@@ -400,7 +421,7 @@ export function buildTraceGrid(
     if (c.bbox) punchOut(punched, c.bbox, -PUNCH_MARGIN);
   }
 
-  return { grid: dilate(punched, DILATE), wirePixelsRaw };
+  return { grid: punched, wirePixelsRaw };
 }
 
 export function traceNets(
@@ -447,19 +468,31 @@ export function traceNets(
     const px = -a.dy;
     const py = a.dx;
     const halfEdge = a.halfEdge * grid.scale;
+
+    /*
+     * Every region in reach is scored, and the best one wins, rather than the
+     * first one the sweep meets. "First" meant nearest along the lead, which is
+     * wrong when the band is wide: a symbol's own stray edge ink, six pixels out
+     * and twenty to one side, beat the wire sitting right on the axis a few
+     * pixels further. A lead's wire is near its axis, so how far off it a hit is
+     * counts against it, twice as heavily as how far along.
+     */
+    let best = 0;
+    let bestCost = Infinity;
     for (let t = 0; t <= rayLength; t++) {
-      // A little splay with distance, for leads that bend away from the body.
       const halfWidth = Math.max(1, halfEdge + t * 0.1);
       for (let k = 0; k <= halfWidth; k++) {
+        const cost = t + LATERAL_WEIGHT * k;
+        if (cost >= bestCost) break; // k only grows, so nothing further on this row can win
         for (const sign of k === 0 ? [0] : [-1, 1]) {
           const nx = Math.round(gx + a.dx * t + px * k * sign);
           const ny = Math.round(gy + a.dy * t + py * k * sign);
           const l = labelAt(nx, ny);
-          if (l) return l;
+          if (l) { best = l; bestCost = cost; break; }
         }
       }
     }
-    return 0;
+    return best;
   };
 
   /** The nearest labelled region to a point, searched outward in rings. */
@@ -535,6 +568,37 @@ export function traceNets(
     axisCorrected.push(c.id);
   }
 
+  /*
+   * Which wire regions run up to a board.
+   *
+   * A board's pins have no geometry, so a wire that ends at one has only a single
+   * anchored pin — the part at its other end — and a region holding one pin is
+   * normally discarded as not being a connection at all. A wire that touches a
+   * board is the exception: its second end is a pin the model read off a label,
+   * and that is supplied afterwards. Keeping the one-pin region is what lets the
+   * measured half of the connection be used rather than thrown away.
+   */
+  const touchesBoard = new Set<number>();
+  const boxes = components
+    .filter((c) => isBoardType(c.type) && c.bbox)
+    .map((c) => {
+      const [bx, by, bw, bh] = c.bbox!;
+      const m = BOARD_TOUCH_MARGIN;
+      return {
+        l: (bx - m) * grid.scale, t: (by - m) * grid.scale,
+        r: (bx + bw + m) * grid.scale, b: (by + bh + m) * grid.scale,
+      };
+    });
+  if (boxes.length) {
+    for (let y = 0; y < grid.h; y++) {
+      for (let x = 0; x < grid.w; x++) {
+        const label = labels[y * grid.w + x];
+        if (!label || !wireLike[label] || touchesBoard.has(label)) continue;
+        if (boxes.some((bb) => x >= bb.l && x <= bb.r && y >= bb.t && y <= bb.b)) touchesBoard.add(label);
+      }
+    }
+  }
+
   const byRegion = new Map<number, string[]>();
   const floating: string[] = [];
   for (const ref of Object.keys(assignments)) {
@@ -543,11 +607,12 @@ export function traceNets(
     byRegion.set(region, [...(byRegion.get(region) ?? []), ref]);
   }
 
-  // A region holding only one pin is not a connection; that pin is floating.
+  // A region holding only one pin is not a connection; that pin is floating,
+  // unless the wire runs to a board, whose end is filled in from the model.
   const nets: Net[] = [];
   let n = 0;
-  for (const [, pins] of [...byRegion.entries()].sort((a, b) => a[0] - b[0])) {
-    if (pins.length < 2) { floating.push(...pins); continue; }
+  for (const [region, pins] of [...byRegion.entries()].sort((a, b) => a[0] - b[0])) {
+    if (pins.length < 2 && !touchesBoard.has(region)) { floating.push(...pins); continue; }
     nets.push({ id: `T${++n}`, pins: [...pins].sort(), source: 'mask_trace' });
   }
 
