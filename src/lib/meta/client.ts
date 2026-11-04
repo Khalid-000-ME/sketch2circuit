@@ -82,13 +82,12 @@ async function post(
     signal: controller.signal,
   });
 
-  const startedAt = Date.now();
   try {
     let res: Response;
     try {
       res = await send();
     } catch (err) {
-      if (controller.signal.aborted || !worthRetrying(err, Date.now() - startedAt)) throw err;
+      if (controller.signal.aborted || !worthRetrying(err)) throw err;
       console.warn(`[meta] ${path} dropped the connection, retrying once`);
       res = await send();
     }
@@ -107,22 +106,24 @@ async function post(
 /**
  * Whether a failure is worth one more attempt.
  *
- * Only transport faults, and only ones that failed fast. The Model API drops
- * connections under load — ECONNRESET, mid-flight — and a dropped connection
- * costs nothing to retry. A timeout is the opposite case: it already spent the
- * full budget, and trying again just spends it twice.
+ * Transport faults only: the connection died underneath us, so there is no
+ * answer coming and nothing is gained by waiting. Measured against the live API,
+ * three identical requests came back in 12.8s, 95.6s and a TLS read timeout, so
+ * a dropped connection says nothing about whether the next one will work.
+ *
+ * Our own abort is excluded, because it arrives as an AbortError rather than a
+ * socket code: that one has already spent its budget and retrying spends it
+ * twice. How long the dead attempt took does not matter — the caller's overall
+ * budget is what bounds the total, not a guess made here.
  */
-function worthRetrying(err: unknown, elapsedMs: number): boolean {
+function worthRetrying(err: unknown): boolean {
   if (err instanceof HttpError) return false;
-  if (elapsedMs > RETRY_MAX_ELAPSED_MS) return false;
+  if (err instanceof Error && err.name === 'AbortError') return false;
   const code = (err as { cause?: { code?: string }; code?: string })?.cause?.code
     ?? (err as { code?: string })?.code;
   return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE'
-    || code === 'ETIMEDOUT' || code === 'UND_ERR_SOCKET';
+    || code === 'ETIMEDOUT' || code === 'UND_ERR_SOCKET' || code === 'UND_ERR_CONNECT_TIMEOUT';
 }
-
-/** A dropped connection is only retried if it dropped quickly. */
-const RETRY_MAX_ELAPSED_MS = 15_000;
 
 function asHttpError(err: unknown): HttpError {
   if (err instanceof HttpError) return err;
