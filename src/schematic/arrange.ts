@@ -19,7 +19,7 @@
 
 import type { CircuitComponent, Net } from '@/lib/types';
 import { GRID, symbolFor } from './symbols';
-import { boundsOf, layoutSchematic, type Layout2D, type Placement2D } from './layout2d';
+import { boundsOf, layoutSchematic, type Layout2D, type Pinned, type Placement2D } from './layout2d';
 import { drawingCost, findConflicts } from './lint';
 import { routeSchematic } from './route2d';
 
@@ -31,7 +31,7 @@ const MAX_PASSES = 5;
 /** One conflict outweighs any plausible difference in tidiness. */
 const CONFLICT_WEIGHT = 100_000;
 
-function arrange(components: CircuitComponent[], nets: Net[], outwardHubs: boolean) {
+function arrange(components: CircuitComponent[], nets: Net[], outwardHubs: boolean, pinned: Record<string, Pinned>) {
   const score = (l: Layout2D) => {
     const routes = routeSchematic(components, nets, l);
     const conflicts = findConflicts(components, l, routes).length;
@@ -44,12 +44,13 @@ function arrange(components: CircuitComponent[], nets: Net[], outwardHubs: boole
     return { placements, bounds: boundsOf(components, placements), outwardHubs };
   };
 
-  let layout: Layout2D = { ...layoutSchematic(components, nets), outwardHubs };
+  let layout: Layout2D = { ...layoutSchematic(components, nets, pinned), outwardHubs };
   let best = score(layout);
 
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let improved = false;
     for (const c of components) {
+      if (c.id in pinned) continue; // a person put it there
       const current = layout.placements.get(c.id)!;
       const candidates: Placement2D[] = [];
       if (!symbolFor(c).fixed) {
@@ -76,8 +77,12 @@ function arrange(components: CircuitComponent[], nets: Net[], outwardHubs: boole
   return { layout, score: best };
 }
 
-export function arrangeSchematic(components: CircuitComponent[], nets: Net[]): Layout2D {
-  const median = arrange(components, nets, false);
-  const outward = arrange(components, nets, true);
+export function arrangeSchematic(
+  components: CircuitComponent[],
+  nets: Net[],
+  pinned: Record<string, Pinned> = {},
+): Layout2D {
+  const median = arrange(components, nets, false, pinned);
+  const outward = arrange(components, nets, true, pinned);
   return outward.score.total < median.score.total ? outward.layout : median.layout;
 }

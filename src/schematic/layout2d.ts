@@ -63,7 +63,22 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-export function layoutSchematic(components: CircuitComponent[], nets: Net[]): Layout2D {
+/** Where a part already is, because a person put it there. */
+export interface Pinned { x: number; y: number; rotation: number }
+
+/**
+ * Lays the circuit out.
+ *
+ * `pinned` parts are fixed: they keep their position and rotation, and every
+ * other part is arranged around them. That is what lets a drag survive the next
+ * edit. Without it, connecting two pins re-ran the layout and every part a person
+ * had moved went back to where the algorithm wanted it.
+ */
+export function layoutSchematic(
+  components: CircuitComponent[],
+  nets: Net[],
+  pinned: Record<string, Pinned> = {},
+): Layout2D {
   const ids = components.map((c) => c.id);
   const index = new Map(ids.map((id, i) => [id, i]));
   const n = ids.length;
@@ -73,7 +88,9 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
   // Radius for repulsion: the part's longest half-extent plus clearance.
   const radius = defs.map((d) => Math.max(d.half[0], d.half[1]) + GRID * 1.4);
 
-  const pos: Vec[] = ids.map((_, i) => {
+  const isPinned = ids.map((id) => id in pinned);
+  const pos: Vec[] = ids.map((id, i) => {
+    if (id in pinned) return { x: pinned[id].x, y: pinned[id].y };
     const a = (i / Math.max(1, n)) * Math.PI * 2;
     const r = GRID * 5 + rand() * GRID * 3;
     return { x: Math.cos(a) * r, y: Math.sin(a) * r };
@@ -147,6 +164,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     }
 
     for (let i = 0; i < n; i++) {
+      if (isPinned[i]) continue; // it pushes the others away, but nothing pushes it
       force[i].x -= pos[i].x * 0.012;
       force[i].y -= pos[i].y * 0.012;
       const cap = GRID * (0.9 * cooling + 0.04);
@@ -185,7 +203,9 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     const pinNames = Object.keys(def.pins);
     let rotation = 0;
 
-    if (pinNames.length >= 2 && !def.fixed) {
+    if (c.id in pinned) {
+      rotation = pinned[c.id].rotation;
+    } else if (pinNames.length >= 2 && !def.fixed) {
       const a = neighbourCentroid(c.id, pinNames[0]);
       const b = neighbourCentroid(c.id, pinNames[1]);
       if (a && b) {
@@ -202,7 +222,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
 
     placements.set(c.id, {
       id: c.id,
-      position: { x: snap(pos[i].x), y: snap(pos[i].y) },
+      position: isPinned[i] ? { x: pos[i].x, y: pos[i].y } : { x: snap(pos[i].x), y: snap(pos[i].y) },
       rotation,
       half: def.half,
       bodyHalf: def.bodyHalf,
@@ -278,7 +298,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     components.forEach((c, i) => {
       const def = defs[i];
       const pinNames = Object.keys(def.pins);
-      if (pinNames.length !== 2) return;
+      if (pinNames.length !== 2 || isPinned[i]) return;
       const place = placements.get(c.id)!;
 
       const hubs = pinNames
@@ -304,7 +324,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     components.forEach((c, i) => {
       const def = defs[i];
       const pinNames = Object.keys(def.pins);
-      if (pinNames.length !== 2) return;
+      if (pinNames.length !== 2 || isPinned[i]) return;
       const place = placements.get(c.id)!;
 
       const cost = (rotation: number) => {
