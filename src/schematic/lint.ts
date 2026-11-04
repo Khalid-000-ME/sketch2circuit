@@ -10,13 +10,18 @@
  *   - a wire running through a component it does not connect to;
  *   - a wire that doubles back over its own part's lead to reach its node, which
  *     draws as a spur sticking out past it;
- *   - labels sitting on other labels, on other parts, or on wires; parts on parts.
+ *   - labels sitting on other labels, on other parts, or on wires; parts on parts;
+ *   - on a board, a wire that crosses its body, or one that touches the tip of a
+ *     pin it does not belong to — a wire running along a column of pin tips reads
+ *     as connected to every one of them.
  *
  * Returned as strings so a failure explains itself.
  */
 
 import type { CircuitComponent } from '@/lib/types';
-import type { Layout2D } from './layout2d';
+import { isBoardType } from '@/lib/circuit/boards';
+import { pinPosition, type Layout2D } from './layout2d';
+import { symbolFor } from './symbols';
 import { labelBoxes, type LabelBox } from './labels';
 import type { RoutedNet } from './route2d';
 
@@ -143,6 +148,34 @@ export function findConflicts(
       if (hit(bodies[i], bodies[j], 6)) problems.push(`${bodies[i].id} and ${bodies[j].id} overlap`);
     }
   }
+  // Boards: dozens of pins in a column make "which one is this wire on" a real question.
+  const distToSegment = (s: Seg, px: number, py: number) => {
+    const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - s.x1) * dx + (py - s.y1) * dy) / len2));
+    return Math.hypot(px - (s.x1 + t * dx), py - (s.y1 + t * dy));
+  };
+  for (const c of components) {
+    if (!isBoardType(c.type)) continue;
+    const p = layout.placements.get(c.id);
+    if (!p) continue;
+    const inner = {
+      left: p.position.x - p.bodyHalf[0] + 3, right: p.position.x + p.bodyHalf[0] - 3,
+      top: p.position.y - p.bodyHalf[1] + 3, bottom: p.position.y + p.bodyHalf[1] - 3,
+    };
+    for (const seg of segs) {
+      const box = { left: Math.min(seg.x1, seg.x2), right: Math.max(seg.x1, seg.x2), top: Math.min(seg.y1, seg.y2), bottom: Math.max(seg.y1, seg.y2) };
+      if (hit(inner, box)) problems.push(`${seg.netId}'s wire (${seg.pinRef}) crosses ${c.id}`);
+    }
+    for (const [pin, local] of Object.entries(symbolFor(c).pins)) {
+      const tip = pinPosition(p, local);
+      for (const seg of segs) {
+        if (seg.pinRef === `${c.id}.${pin}`) continue;
+        if (distToSegment(seg, tip.x, tip.y) < 7) problems.push(`${seg.netId}'s wire (${seg.pinRef}) touches ${c.id}.${pin}`);
+      }
+    }
+  }
+
   // A label under a wire is unreadable however good its halo is.
   for (const label of labels) {
     for (const s of segs) {

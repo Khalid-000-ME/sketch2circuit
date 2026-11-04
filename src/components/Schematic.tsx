@@ -229,6 +229,32 @@ export default function Schematic({
                   {net.showJunction && (
                     <circle cx={net.hub.x} cy={net.hub.y} r={4} className="wire-junction" />
                   )}
+                  {net.flag && net.flags?.map((f, i) => (
+                    <g key={i} className="net-flag" transform={`translate(${f.at.x} ${f.at.y})`}>
+                      {net.flag!.kind === 'ground' ? (
+                        // Three bars across the lead, each shorter than the last.
+                        <g transform={`rotate(${Math.atan2(f.dir.y, f.dir.x) * 180 / Math.PI})`}>
+                          <line x1={0} y1={-9} x2={0} y2={9} />
+                          <line x1={5} y1={-6} x2={5} y2={6} />
+                          <line x1={10} y1={-3} x2={10} y2={3} />
+                        </g>
+                      ) : (
+                        <g>
+                          <g transform={`rotate(${Math.atan2(f.dir.y, f.dir.x) * 180 / Math.PI})`}>
+                            <line x1={0} y1={-9} x2={0} y2={9} />
+                          </g>
+                          <text
+                            className="net-flag-label"
+                            x={f.dir.x * 10 + (f.dir.x === 0 ? 0 : f.dir.x > 0 ? 4 : -4)}
+                            y={f.dir.y * 12 + (f.dir.y === 0 ? 4 : f.dir.y > 0 ? 8 : -2)}
+                            textAnchor={f.dir.x > 0 ? 'start' : f.dir.x < 0 ? 'end' : 'middle'}
+                          >
+                            {net.flag!.label}
+                          </text>
+                        </g>
+                      )}
+                    </g>
+                  ))}
                 </g>
               );
             })}
@@ -242,7 +268,11 @@ export default function Schematic({
             const severity = severityOf.get(c.id);
             const selected = c.id === selectedId;
             const label = valueLabel(c);
-            const hitHalf = Math.max(def.half[0], def.half[1]) + 6;
+            // The hit area follows the part's footprint, turned with it. A square sized
+            // to the longest side would, for a tall board, cover the parts beside it.
+            const turned = placement.rotation % 180 !== 0;
+            const hitW = Math.max(22, (turned ? def.half[1] : def.half[0]) + 4);
+            const hitH = Math.max(22, (turned ? def.half[0] : def.half[1]) + 4);
 
             return (
               <g key={c.id}>
@@ -287,10 +317,10 @@ export default function Schematic({
 
                 {/* The hit area: generous, square, and the keyboard focus target. */}
                 <rect
-                  x={placement.position.x - hitHalf}
-                  y={placement.position.y - hitHalf}
-                  width={hitHalf * 2}
-                  height={hitHalf * 2}
+                  x={placement.position.x - hitW}
+                  y={placement.position.y - hitH}
+                  width={hitW * 2}
+                  height={hitH * 2}
                   fill="transparent"
                   className="cursor-pointer outline-none"
                   tabIndex={0}

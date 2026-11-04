@@ -1,0 +1,99 @@
+{
+ "components": [
+  {
+   "id": "U1",
+   "type": "arduino_uno",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "RESET",
+    "3V3",
+    "5V",
+    "VIN",
+    "GND",
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13",
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+   ]
+  },
+  {
+   "id": "RPI1",
+   "type": "raspberry_pi",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "3V3",
+    "5V",
+    "GND",
+    "GPIO2",
+    "GPIO3",
+    "GPIO4",
+    "GPIO5",
+    "GPIO6",
+    "GPIO7",
+    "GPIO8",
+    "GPIO9",
+    "GPIO10",
+    "GPIO11",
+    "GPIO12",
+    "GPIO13",
+    "GPIO14",
+    "GPIO15",
+    "GPIO16",
+    "GPIO17",
+    "GPIO18",
+    "GPIO19",
+    "GPIO20",
+    "GPIO21",
+    "GPIO22",
+    "GPIO23",
+    "GPIO24",
+    "GPIO25",
+    "GPIO26",
+    "GPIO27"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "RPI1.GND",
+    "U1.GND"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "RPI1.GPIO17",
+    "U1.D13"
+   ]
+  }
+ ]
+}

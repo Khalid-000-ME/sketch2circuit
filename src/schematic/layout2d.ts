@@ -11,6 +11,8 @@
  */
 
 import type { CircuitComponent, Net } from '@/lib/types';
+import { flagKind } from './flags';
+import { labelBoxes } from './labels';
 import { GRID, symbolFor } from './symbols';
 
 export interface Vec { x: number; y: number }
@@ -77,13 +79,40 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     return { x: Math.cos(a) * r, y: Math.sin(a) * r };
   });
 
-  const edges: Array<[number, number]> = [];
+  /**
+   * A connection pulls on the point where it attaches, not on the part's centre.
+   * For a two-lead part those are the same thing to within a few pixels. For a
+   * board they are not: D13 is on the right-hand edge, 100 units from the middle,
+   * and a resistor wired to it belongs over there. Treating the board as a point
+   * puts the resistor wherever the other forces happen to leave it, which is how
+   * a part ends up on the left of the board with a wire crossing the whole thing.
+   */
+  interface Edge { a: number; b: number; offA: Vec; offB: Vec }
+  const edges: Edge[] = [];
+  const partById = new Map(components.map((c) => [c.id, c]));
+  const flagged = new Set(nets.filter((net) => flagKind(net, partById)).map((net) => net.id));
   for (const net of nets) {
-    const members = [...new Set(net.pins.map((p) => p.split('.')[0]))]
-      .map((id) => index.get(id))
-      .filter((i): i is number => i != null);
-    for (let i = 0; i < members.length; i++) {
-      for (let j = i + 1; j < members.length; j++) edges.push([members[i], members[j]]);
+    // A net drawn as symbols has no wire to keep short, so it must not drag its
+    // parts toward a board they are not otherwise related to.
+    if (flagged.has(net.id)) continue;
+    const byPart = new Map<number, Vec[]>();
+    for (const ref of net.pins) {
+      const id = ref.slice(0, ref.lastIndexOf('.'));
+      const pin = ref.slice(ref.lastIndexOf('.') + 1);
+      const i = index.get(id);
+      if (i == null) continue;
+      const local = defs[i].fixed ? defs[i].pins[pin] : undefined;
+      byPart.set(i, [...(byPart.get(i) ?? []), local ? { x: local[0], y: local[1] } : { x: 0, y: 0 }]);
+    }
+    const mean = (list: Vec[]): Vec => ({
+      x: list.reduce((a, v) => a + v.x, 0) / list.length,
+      y: list.reduce((a, v) => a + v.y, 0) / list.length,
+    });
+    const parts = [...byPart.entries()];
+    for (let x = 0; x < parts.length; x++) {
+      for (let y = x + 1; y < parts.length; y++) {
+        edges.push({ a: parts[x][0], b: parts[y][0], offA: mean(parts[x][1]), offB: mean(parts[y][1]) });
+      }
     }
   }
 
@@ -106,9 +135,10 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
       }
     }
 
-    for (const [i, j] of edges) {
-      const dx = pos[j].x - pos[i].x;
-      const dy = pos[j].y - pos[i].y;
+    for (const { a: i, b: j, offA, offB } of edges) {
+      // Between the attachment points; the force still acts on the centres.
+      const dx = pos[j].x + offB.x - (pos[i].x + offA.x);
+      const dy = pos[j].y + offB.y - (pos[i].y + offA.y);
       const len = Math.max(Math.hypot(dx, dy), 1e-4);
       const mag = (len - IDEAL_EDGE) * 0.09;
       const ux = (dx / len) * mag, uy = (dy / len) * mag;
@@ -155,7 +185,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
     const pinNames = Object.keys(def.pins);
     let rotation = 0;
 
-    if (pinNames.length >= 2) {
+    if (pinNames.length >= 2 && !def.fixed) {
       const a = neighbourCentroid(c.id, pinNames[0]);
       const b = neighbourCentroid(c.id, pinNames[1]);
       if (a && b) {
@@ -197,6 +227,7 @@ export function layoutSchematic(components: CircuitComponent[], nets: Net[]): La
   for (const net of nets) for (const pin of net.pins) netOfPin.set(pin, net);
 
   const hubOf = (net: Net): Vec | null => {
+    if (flagged.has(net.id)) return null;
     const points = net.pins
       .map((ref) => {
         const id = ref.slice(0, ref.lastIndexOf('.'));
@@ -323,6 +354,11 @@ export function boundsOf(
       maxX = Math.max(maxX, p.position.x + corner.x);
       minY = Math.min(minY, p.position.y + corner.y);
       maxY = Math.max(maxY, p.position.y + corner.y);
+    }
+    // The labels are part of the drawing. Fitting to the bodies alone clips them.
+    for (const box of labelBoxes(c, p)) {
+      minX = Math.min(minX, box.left); maxX = Math.max(maxX, box.right);
+      minY = Math.min(minY, box.top); maxY = Math.max(maxY, box.bottom);
     }
   }
   if (!Number.isFinite(minX)) { minX = -100; minY = -100; maxX = 100; maxY = 100; }

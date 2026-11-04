@@ -186,3 +186,29 @@ body {
   stroke-width: 4px;
   stroke-linejoin: round;
 }
+
+/* Board symbols: a dark body with the pin names inside it. */
+.symbol rect.board-body { fill: #101722; }
+.symbol .symbol-title {
+  fill: #6b7a8d; stroke: none; text-anchor: middle;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.18em;
+}
+.symbol .symbol-pinlabel {
+  fill: #aebbcc; stroke: none;
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px;
+}
+.symbol--selected .symbol-pinlabel { fill: var(--accent); }
+
+/* Ground and supply flags: the symbol stands in for a wire that would otherwise
+   have to be routed to every part that uses the rail. */
+.net-flag line { stroke: #8fa3bb; stroke-width: 2; stroke-linecap: round; fill: none; }
+.net-flag-label {
+  fill: #aebbcc; stroke: var(--bg); stroke-width: 4px; paint-order: stroke fill;
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; font-weight: 600;
+}
+
+/* A faulted board pulses its outline, not its forty pin leads: colouring every
+   pin says every pin is at fault. */
+.symbol--error .board-pin, .symbol--warning .board-pin { stroke: #d7e0ea; }
+.symbol--selected .board-pin { stroke: var(--accent); }

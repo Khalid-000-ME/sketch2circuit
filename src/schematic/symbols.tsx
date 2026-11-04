@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react';
 import type { CircuitComponent, ComponentType } from '@/lib/types';
 import { formatValue, parseValue } from '@/lib/circuit/units';
+import { BOARDS, isBoardType } from '@/lib/circuit/boards';
 
 /** Grid pitch, in SVG user units. All pins land on a multiple of this. */
 export const GRID = 20;
@@ -32,6 +33,11 @@ export interface SymbolDef {
    * part's own leads and onto whatever wire runs there.
    */
   bodyHalf: readonly [number, number];
+  /**
+   * Never turned. A block symbol carries text, and text on its side is not
+   * something anyone wants to read, so layout leaves these upright.
+   */
+  fixed?: boolean;
   draw: (c: CircuitComponent) => ReactNode;
 }
 
@@ -372,8 +378,60 @@ const STATIC: Partial<Record<ComponentType, SymbolDef>> = {
   inductor, crystal, buzzer, motor, junction, unknown,
 };
 
+/**
+ * A development board as a labelled block: power and analog on the left, digital
+ * on the right, the way a microcontroller is drawn in any schematic tool.
+ *
+ * Pin rows sit on the grid so wires leave cleanly, and the lead stub on each row
+ * is a full grid step so labels inside the body do not crowd the wire.
+ */
+const BOARD_ROW = 20;
+const BOARD_HALF_W = 80;
+const BOARD_PIN_X = BOARD_HALF_W + 20;
+
+function boardSymbol(c: CircuitComponent): SymbolDef {
+  const spec = BOARDS[c.type as keyof typeof BOARDS];
+  const rows = Math.max(spec.symbol.left.length, spec.symbol.right.length);
+  const top = -((rows - 1) / 2) * BOARD_ROW;
+  const half = (rows * BOARD_ROW) / 2 + BOARD_ROW / 2;
+
+  const pins: Pins = {};
+  spec.symbol.left.forEach((name, i) => { pins[name] = [-BOARD_PIN_X, top + i * BOARD_ROW]; });
+  spec.symbol.right.forEach((name, i) => { pins[name] = [BOARD_PIN_X, top + i * BOARD_ROW]; });
+
+  return {
+    pins,
+    half: [BOARD_PIN_X, half],
+    bodyHalf: [BOARD_HALF_W, half],
+    fixed: true,
+    draw: () => (
+      <>
+        <rect className="board-body" x={-BOARD_HALF_W} y={-half} width={BOARD_HALF_W * 2} height={half * 2} rx={4} />
+        <text className="symbol-title" transform="rotate(-90)" x={0} y={5}>{spec.symbol.title}</text>
+        {Object.entries(pins).map(([name, [px, py]]) => {
+          const left = px < 0;
+          return (
+            <g key={name}>
+              <line className="board-pin" x1={px} y1={py} x2={left ? -BOARD_HALF_W : BOARD_HALF_W} y2={py} />
+              <text
+                className="symbol-pinlabel"
+                x={left ? -BOARD_HALF_W + 6 : BOARD_HALF_W - 6}
+                y={py + 4}
+                textAnchor={left ? 'start' : 'end'}
+              >
+                {name}
+              </text>
+            </g>
+          );
+        })}
+      </>
+    ),
+  };
+}
+
 /** The symbol for a component. Pin-count-dependent types are built per instance. */
 export function symbolFor(c: CircuitComponent): SymbolDef {
+  if (isBoardType(c.type)) return boardSymbol(c);
   if (c.type === 'ic') return dipSymbol(c);
   if (c.type === 'header') return headerSymbol(c);
   return STATIC[c.type] ?? unknown;

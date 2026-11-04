@@ -18,14 +18,15 @@
  */
 
 import type { CircuitComponent, Net } from '@/lib/types';
-import { GRID } from './symbols';
+import { GRID, symbolFor } from './symbols';
 import { boundsOf, layoutSchematic, type Layout2D, type Placement2D } from './layout2d';
 import { drawingCost, findConflicts } from './lint';
 import { routeSchematic } from './route2d';
 
 const ROTATIONS = [0, 90, 180, 270];
 /** Grid steps a part may be nudged, in each axis. */
-const NUDGES = [-2, -1, 1, 2];
+// Wide enough to move a part from one side of a board to the other.
+const NUDGES = [-8, -4, -2, -1, 1, 2, 4, 8];
 const MAX_PASSES = 5;
 /** One conflict outweighs any plausible difference in tidiness. */
 const CONFLICT_WEIGHT = 100_000;
@@ -51,8 +52,10 @@ function arrange(components: CircuitComponent[], nets: Net[], outwardHubs: boole
     for (const c of components) {
       const current = layout.placements.get(c.id)!;
       const candidates: Placement2D[] = [];
-      for (const rotation of ROTATIONS) {
-        if (rotation !== current.rotation) candidates.push({ ...current, rotation });
+      if (!symbolFor(c).fixed) {
+        for (const rotation of ROTATIONS) {
+          if (rotation !== current.rotation) candidates.push({ ...current, rotation });
+        }
       }
       for (const step of NUDGES) {
         candidates.push({ ...current, position: { x: current.position.x + step * GRID, y: current.position.y } });

@@ -1,0 +1,93 @@
+{
+ "components": [
+  {
+   "id": "U1",
+   "type": "arduino_uno",
+   "value": null,
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "RESET",
+    "3V3",
+    "5V",
+    "VIN",
+    "GND",
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13",
+    "A0",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+   ]
+  },
+  {
+   "id": "R1",
+   "type": "resistor",
+   "value": "220",
+   "unit": "ohm",
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "id": "D1",
+   "type": "led",
+   "value": "red",
+   "unit": null,
+   "orientation": null,
+   "bbox": null,
+   "mask_id": null,
+   "confidence": 0.95,
+   "pins": [
+    "anode",
+    "cathode"
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "N1",
+   "pins": [
+    "D1.anode",
+    "R1.b"
+   ]
+  },
+  {
+   "id": "N2",
+   "pins": [
+    "D1.cathode",
+    "U1.GND"
+   ],
+   "is_ground": true
+  },
+  {
+   "id": "N3",
+   "pins": [
+    "R1.a",
+    "U1.D13"
+   ]
+  }
+ ]
+}

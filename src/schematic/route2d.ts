@@ -12,6 +12,7 @@
  */
 
 import type { Net } from '@/lib/types';
+import { flagKind, type FlagNet } from './flags';
 import { GRID, symbolFor } from './symbols';
 import { pinDirection, pinPosition, type Layout2D, type Vec } from './layout2d';
 import type { CircuitComponent } from '@/lib/types';
@@ -39,6 +40,12 @@ export interface RoutedNet {
   isGround: boolean;
   /** Set when this net's connections came from the model, not the traced masks. */
   inferred: boolean;
+  /**
+   * Set when the net is drawn as a symbol at each pin instead of as wires between
+   * them: ground, and the supply rails of a board.
+   */
+  flag?: FlagNet;
+  flags?: Array<{ at: Vec; dir: Vec }>;
 }
 
 const snap = (v: number) => Math.round(v / GRID) * GRID;
@@ -138,6 +145,28 @@ export function routeSchematic(
       .filter((x): x is { ref: string; at: Vec; dir: Vec } => x != null);
 
     if (ends.length < 2) continue;
+
+    const flag = flagKind(net, byId);
+    if (flag) {
+      // A short lead out of each pin, and the symbol on the end of it.
+      routed.push({
+        netId: net.id,
+        hub: ends[0].at,
+        showJunction: false,
+        isGround: flag.kind === 'ground',
+        inferred: net.source === 'model',
+        flag,
+        flags: ends.map((e) => ({ at: { x: e.at.x + e.dir.x * GRID, y: e.at.y + e.dir.y * GRID }, dir: e.dir })),
+        wires: ends.map((e) => ({
+          netId: net.id,
+          pinRef: e.ref,
+          d: `M ${e.at.x} ${e.at.y} L ${e.at.x + e.dir.x * GRID} ${e.at.y + e.dir.y * GRID}`,
+          length: GRID,
+          backtracks: false,
+        })),
+      });
+      continue;
+    }
 
     const hub = hubFor(ends, layout.outwardHubs ?? false);
 
