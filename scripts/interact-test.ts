@@ -45,12 +45,33 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // A passive-listener intervention is a console message, not a page error.
+  page.on('console', (m) => { if (/passive|intervention/i.test(m.text())) errors.push(`console: ${m.text()}`); });
 
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /circuit that works/i }).click();
   await page.waitForSelector('main > header', { timeout: 60_000 });
   await page.waitForSelector('rect[aria-label^="R1,"]');
   await page.waitForTimeout(500);
+
+  // ── Zoom ──────────────────────────────────────────────────────────────────
+  const widthBefore = (await part(page, 'R1').boundingBox())!.width;
+  const scrollBefore = await page.evaluate('window.scrollY');
+  const c0 = await centre(page, 'R1');
+  await page.mouse.move(c0.x, c0.y);
+  await page.mouse.wheel(0, -100); // one notch of a mouse wheel
+  await page.waitForTimeout(250);
+  const widthAfter = (await part(page, 'R1').boundingBox())!.width;
+  check('one wheel notch zooms by about a sixth', widthAfter > widthBefore * 1.1 && widthAfter < widthBefore * 1.25, `${widthBefore} -> ${widthAfter}`);
+  check('and does not scroll the page behind it', (await page.evaluate('window.scrollY')) === scrollBefore);
+  // A trackpad is dozens of tiny events; together they must not run away.
+  const w1 = (await part(page, 'R1').boundingBox())!.width;
+  for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -4);
+  await page.waitForTimeout(250);
+  const w2 = (await part(page, 'R1').boundingBox())!.width;
+  check('a trackpad flick zooms proportionally, not wildly', w2 > w1 && w2 < w1 * 1.4, `${w1} -> ${w2}`);
+  await page.getByRole('button', { name: 'Fit' }).click(); // back to a view the rest of the test can reach
+  await page.waitForTimeout(300);
 
   // ── Drag ──────────────────────────────────────────────────────────────────
   const before = await placed(page, 'R1');

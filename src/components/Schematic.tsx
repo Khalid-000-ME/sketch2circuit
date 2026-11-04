@@ -206,15 +206,20 @@ export default function Schematic({
   const [wiringFrom, setWiringFrom] = useState<string | null>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
+  // Looked up once per change, not once per pin per frame: a board alone has
+  // twenty-odd pins, and every one of them asks "which part, which net".
+  const partById = useMemo(() => new Map(components.map((c) => [c.id, c])), [components]);
+  const connectedPins = useMemo(() => new Set(nets.flatMap((n) => n.pins)), [nets]);
+
   /** Where a pin is drawn right now, following any drag in progress. */
   const pinAt = useCallback((ref: string) => {
     const id = ref.slice(0, ref.lastIndexOf('.'));
     const pin = ref.slice(ref.lastIndexOf('.') + 1);
-    const part = components.find((c) => c.id === id);
+    const part = partById.get(id);
     const placement = layout.placements.get(id);
     const local = part ? symbolFor(part).pins[pin] : undefined;
     return placement && local ? pinPosition(placement, local) : null;
-  }, [components, layout]);
+  }, [partById, layout]);
 
   const pinClick = (ref: string) => {
     if (!wiringFrom) { setWiringFrom(ref); return; }
@@ -234,7 +239,7 @@ export default function Schematic({
     });
   }, [layout]);
 
-  const selected = selectedId ? components.find((c) => c.id === selectedId) ?? null : null;
+  const selected = selectedId ? partById.get(selectedId) ?? null : null;
   const selectedDef = selected ? symbolFor(selected) : null;
 
   useEffect(() => {
@@ -266,23 +271,38 @@ export default function Schematic({
     onHover(id);
   };
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
+  /*
+   * Zoom on the wheel. React attaches wheel listeners as passive, and a passive
+   * listener may not call preventDefault, so the page would scroll while the
+   * drawing zoomed and the browser would log an intervention for it. The listener
+   * is attached by hand, once, and says it is not passive.
+   */
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const rect = host.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    setView((v) => {
-      const next = Math.min(4, Math.max(0.2, v.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-      // Keep the point under the cursor fixed while zooming.
-      return {
-        scale: next,
-        x: px - ((px - v.x) / v.scale) * next,
-        y: py - ((py - v.y) / v.scale) * next,
-      };
-    });
-  };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = host.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      // Proportional to how far the wheel moved. A fixed step per event was fine
+      // for a mouse, which sends one event per notch, and wild for a trackpad,
+      // which sends dozens a second. Browsers report some wheels in lines, not pixels.
+      const pixels = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      const factor = Math.exp(-Math.max(-300, Math.min(300, pixels)) * 0.0015);
+      setView((v) => {
+        const next = Math.min(4, Math.max(0.2, v.scale * factor));
+        // Keep the point under the cursor fixed while zooming.
+        return {
+          scale: next,
+          x: px - ((px - v.x) / v.scale) * next,
+          y: py - ((py - v.y) / v.scale) * next,
+        };
+      });
+    };
+    host.addEventListener('wheel', onWheel, { passive: false });
+    return () => host.removeEventListener('wheel', onWheel);
+  }, []);
 
   // A part being pressed: where it started, and whether it has become a drag.
   const partRef = useRef<{ id: string; cx: number; cy: number; px: number; py: number; moved: boolean } | null>(null);
@@ -355,7 +375,6 @@ export default function Schematic({
     <div
       ref={hostRef}
       className="relative h-full w-full overflow-hidden"
-      onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -529,7 +548,7 @@ export default function Schematic({
               const ref = `${c.id}.${pin}`;
               const at = pinAt(ref);
               if (!at) return null;
-              const connected = Boolean(netOfPin(nets, ref));
+              const connected = connectedPins.has(ref);
               return (
                 <g
                   key={ref}
@@ -597,8 +616,9 @@ export default function Schematic({
       ) : null}
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-        <p className="text-[11px] text-faint">
-          Drag a part to move it · click a pin, then another, to wire · scroll to zoom
+        <p className="px-4 text-center text-[11px] text-faint">
+          <span className="sm:hidden">Drag a part · tap two pins to wire</span>
+          <span className="hidden sm:inline">Drag a part to move it · click a pin, then another, to wire · scroll to zoom</span>
         </p>
       </div>
 
