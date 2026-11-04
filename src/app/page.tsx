@@ -6,6 +6,7 @@ import Capture from '@/components/Capture';
 import Findings from '@/components/Findings';
 import Inspector from '@/components/Inspector';
 import SourceImage from '@/components/SourceImage';
+import SpecPanel from '@/components/SpecPanel';
 import StageStatus from '@/components/StageStatus';
 import Schematic from '@/components/Schematic';
 import dynamic from 'next/dynamic';
@@ -380,6 +381,8 @@ export default function Page() {
 
         <aside className="flex w-full shrink-0 flex-col gap-4 overflow-y-auto border-t border-edge p-4 lg:w-[400px] lg:border-l lg:border-t-0 xl:w-[440px]">
           <Findings findings={findings} selectedId={selectedId} onSelect={selectAndFocus} />
+
+          <SpecPanel items={result?.spec ?? []} nets={nets} onConnect={handleConnect} />
 
           <Inspector
             component={selected}
