@@ -1,5 +1,6 @@
 /** Core domain types. Shared by the vision pipeline, the solver and the renderer. */
 
+import type { PartDef } from './circuit/partdef';
 import { ARDUINO_UNO_PINS, RASPBERRY_PI_PINS, type PinState } from './circuit/boards';
 export type { PinState } from './circuit/boards';
 
@@ -12,6 +13,8 @@ export type ComponentType =
   | 'transistor' | 'ic' | 'inductor' | 'crystal' | 'header' | 'buzzer' | 'motor'
   // Boards
   | 'arduino_uno' | 'raspberry_pi'
+  // A part the user described: its pins and behaviour travel in `custom`.
+  | 'custom'
   | 'unknown';
 
 export const PINS: Record<ComponentType, readonly string[]> = {
@@ -34,6 +37,7 @@ export const PINS: Record<ComponentType, readonly string[]> = {
   motor: ['a', 'b'],
   arduino_uno: [...ARDUINO_UNO_PINS],
   raspberry_pi: [...RASPBERRY_PI_PINS],
+  custom: [],
   unknown: ['a', 'b'],
 };
 
@@ -61,6 +65,8 @@ export interface CircuitComponent {
    * property of the firmware. Absent means assumed, and the assumption is stated.
    */
   pin_states?: Record<string, PinState>;
+  /** The definition of a described part. Present exactly when type is 'custom'. */
+  custom?: PartDef;
 }
 
 export interface Net {
@@ -88,6 +94,8 @@ export interface Simulation {
   iterations?: number;
   /** Current each driven board pin delivers, keyed "U1.D13", amps. Positive is sourcing. */
   pin_currents?: Record<string, number>;
+  /** Current into each pin of each described part, amps, keyed by component then pin. */
+  part_currents?: Record<string, Record<string, number>>;
 }
 
 export type Severity = 'error' | 'warning' | 'info';

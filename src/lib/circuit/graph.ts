@@ -111,7 +111,7 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
     const type = normaliseType(raw.type);
     let id = String(raw.id ?? '').trim();
     if (!id || seenIds.has(id)) {
-      const pfx = prefixFor(type);
+      const pfx = type === 'custom' && raw.custom ? raw.custom.prefix : prefixFor(type);
       const n = (counters.get(pfx) ?? 0) + 1;
       counters.set(pfx, n);
       const fresh = `${pfx}${n}`;
@@ -122,7 +122,7 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
       idMap.set(id, id);
     }
     seenIds.add(id);
-    const pins = [...PINS[type]];
+    const pins = type === 'custom' ? (raw.custom?.pins.map((x) => x.name) ?? []) : [...PINS[type]];
     const pin_states = isBoardType(type) && raw.pin_states
       ? Object.fromEntries(
           Object.entries(raw.pin_states).filter(([pin, st]) => pins.includes(pin) && ['high', 'low', 'input'].includes(st)),
@@ -153,6 +153,15 @@ export function canonicalise(graph: CircuitGraph): CanonResult {
       // and reported rather than quietly wired to something else.
       const pin = normaliseBoardPin(c.type, rawPin);
       if (!pin || !c.pins.includes(pin)) {
+        unknownBoardPins.push(`${id}.${rawPin || '?'}`);
+        return null;
+      }
+      return `${id}.${pin}`;
+    }
+    if (c.type === 'custom') {
+      // A described part has exactly the pins it declared; nothing is guessed.
+      const pin = rawPin.toLowerCase().trim();
+      if (!c.pins.includes(pin)) {
         unknownBoardPins.push(`${id}.${rawPin || '?'}`);
         return null;
       }

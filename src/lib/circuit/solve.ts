@@ -10,6 +10,7 @@
 import type { CircuitComponent, CircuitGraph, ComponentResult, Net, Simulation } from '../types';
 import { LED_VF, parseValue } from './units';
 import { BOARDS, isBoardType, type PinState } from './boards';
+import { expandPart, commitSwitches, type Expanded } from './devices';
 
 /** Conductance added from every node to ground so floating sub-graphs stay solvable. */
 const GMIN = 1e-9;
@@ -70,7 +71,7 @@ export function defaultValue(c: CircuitComponent): number | null {
 
 /** True when the component carried no usable value and the solver substituted one. */
 export function valueAssumed(c: CircuitComponent): boolean {
-  if (c.type === 'led' || c.type === 'ground' || c.type === 'junction') return false;
+  if (c.type === 'led' || c.type === 'ground' || c.type === 'junction' || c.type === 'custom') return false;
   const v = parseValue(c.value);
   return !(v != null && v > 0);
 }
@@ -150,6 +151,15 @@ export function buildTopology(graph: CircuitGraph): Topology {
     const batteries = graph.components.filter((c) => c.type === 'battery');
     for (const b of batteries) {
       const n = graph.nets.find((net) => net.pins.includes(`${b.id}.neg`));
+      if (n) { groundNet = n; break; }
+    }
+  }
+  if (!groundNet) {
+    // A described part with its own source: the negative side of the first one.
+    for (const c of graph.components) {
+      const src = c.custom?.elements.find((e) => e.kind === 'vsource');
+      if (c.type !== 'custom' || src?.kind !== 'vsource') continue;
+      const n = graph.nets.find((net) => net.pins.includes(`${c.id}.${src.n}`));
       if (n) { groundNet = n; break; }
     }
   }
@@ -248,11 +258,37 @@ export function solveDC(graph: CircuitGraph): Simulation {
   const nd = (n: number) => n;
 
   const nortons = boardSources(graph, node);
-  if (sources.length === 0 && nortons.length === 0) {
+
+  // Described parts: lay their elements onto solver nodes. A pin wired to nothing
+  // gets a node of its own, so it floats instead of being tied to ground.
+  const customs = comps.filter((c) => c.type === 'custom' && c.custom);
+  const nonlinear = comps.filter((c) => c.type === 'led' || c.type === 'diode');
+  let extra = 0;
+  const fresh = () => topo.nodeCount + nonlinear.length + extra++;
+  const expanded = new Map<string, Expanded>();
+  for (const c of customs) {
+    const def = c.custom!;
+    const names = new Map<string, number>();
+    const resolve = (name: string): number => {
+      const hit = names.get(name);
+      if (hit != null) return hit;
+      const isPin = def.pins.some((p) => p.name === name);
+      const wired = isPin ? node(`${c.id}.${name}`) : -1;
+      const n = wired >= 0 ? wired : fresh();
+      names.set(name, n);
+      return n;
+    };
+    expanded.set(c.id, expandPart(c.id, def, parseValue(c.value), resolve, fresh));
+  }
+  const customDevices = [...expanded.values()].flatMap((e) => e.devices);
+  const customV = [...expanded.values()].flatMap((e) => e.vsources);
+  const customI = [...expanded.values()].flatMap((e) => e.isources);
+  const customNonlinear = customDevices.some((d) => d.nonlinear);
+  const hasOpamp = [...expanded.values()].some((e) => e.hasOpamp);
+
+  if (sources.length === 0 && nortons.length === 0 && customV.length === 0 && customI.length === 0) {
     return { ...empty, status: 'no_source', reason: 'No power source was found, so every node sits at 0V.' };
   }
-
-  const nonlinear = comps.filter((c) => c.type === 'led' || c.type === 'diode');
 
   /**
    * Unknown vector layout:
@@ -264,9 +300,10 @@ export function solveDC(graph: CircuitGraph): Simulation {
   const netNodes = topo.nodeCount - 1;
   const internalOf = new Map<string, number>();
   nonlinear.forEach((d, i) => internalOf.set(d.id, topo.nodeCount + i));
-  const nNodes = netNodes + nonlinear.length;
+  const nNodes = netNodes + nonlinear.length + extra;
   const branches: Branch[] = sources.map((comp, i) => ({ comp, index: nNodes + i }));
-  const size = nNodes + branches.length;
+  const vIndex = new Map(customV.map((src, i) => [src, nNodes + branches.length + i]));
+  const size = nNodes + branches.length + customV.length;
   if (size === 0) return { ...empty, reason: 'The circuit collapses to a single node.' };
 
   const v = new Array<number>(size).fill(0);
@@ -280,7 +317,16 @@ export function solveDC(graph: CircuitGraph): Simulation {
   let iterations = 0;
   let converged = false;
   let last = [...v];
+  const state = new Map<string, number>();
+  // An op-amp's gain is brought up in steps, each solved from the last, so the
+  // output is never left stuck on a rail by a start far from the answer.
+  const gains = hasOpamp ? [1, 10, 1e2, 1e3, 1e4, 1e5] : [1];
+  let finalGain = 1;
+  let flips = 0;
 
+  for (const gain of gains) {
+  finalGain = gain;
+  converged = false;
   for (let iter = 0; iter < MAX_ITER; iter++) {
     iterations = iter + 1;
     let limitedThisIter = false;
@@ -387,6 +433,29 @@ export function solveDC(graph: CircuitGraph): Simulation {
       }
     }
 
+    // Described parts: each device is linearised about the last iterate.
+    for (const d of customDevices) {
+      const ev = d.eval(d.nodes.map(nodeV), state, false, gain);
+      if (ev.limited) limitedThisIter = true;
+      d.nodes.forEach((nk, k) => {
+        if (nk <= 0) return;
+        let constant = ev.I[k];
+        d.nodes.forEach((nj, j) => {
+          constant -= ev.J[k][j] * ev.v0[j];
+          if (nj > 0) A[nk - 1][nj - 1] += ev.J[k][j];
+        });
+        b[nk - 1] -= constant;
+      });
+    }
+    for (const src of customI) stampI(src.from, src.to, src.amps);
+    for (const src of customV) {
+      const k = vIndex.get(src)!;
+      if (src.np > 0) { A[src.np - 1][k] += 1; A[k][src.np - 1] += 1; }
+      if (src.nn > 0) { A[src.nn - 1][k] -= 1; A[k][src.nn - 1] -= 1; }
+      A[k][k] -= src.rint;
+      b[k] = src.volts;
+    }
+
     const x = luSolve(A, b);
     if (!x) {
       return { ...empty, reason: 'The circuit has no solvable operating point — usually a short across the supply or a node connected to nothing.' };
@@ -399,10 +468,16 @@ export function solveDC(graph: CircuitGraph): Simulation {
       v[i] = x[i];
     }
     last = [...v];
-    if (nonlinear.length === 0) { converged = true; break; }
+    // A contact that changed state this pass has changed the circuit.
+    const flipped = commitSwitches(customDevices, state);
+    if (flipped) { flips++; limitedThisIter = true; }
+    if (flips > 60) break;
+    if (nonlinear.length === 0 && !customNonlinear) { converged = true; break; }
     // A device whose Newton step was damped is still travelling, however little
     // the node voltages moved. Without this the loop declares victory early.
     if (iter > 0 && dvMax < V_TOL && !limitedThisIter) { converged = true; break; }
+  }
+  if (!converged) break;
   }
 
   if (!converged) {
@@ -440,8 +515,41 @@ export function solveDC(graph: CircuitGraph): Simulation {
     };
   }
 
+  // Described parts: the current into each pin is the sum of what the elements
+  // draw there, and the power is what those currents do across the pin voltages.
+  const part_currents: Record<string, Record<string, number>> = {};
+  for (const c of customs) {
+    const def = c.custom!;
+    const ex = expanded.get(c.id)!;
+    const into: Record<string, number> = Object.fromEntries(def.pins.map((p) => [p.name, 0]));
+    for (const d of ex.devices) {
+      const ev = d.eval(d.nodes.map(nodeV), state, true, finalGain);
+      d.names?.forEach((name, k) => { if (name in into) into[name] += ev.I[k]; });
+    }
+    for (const src of ex.vsources) {
+      const i = last[vIndex.get(src)! ];
+      if (src.pins[0] in into) into[src.pins[0]] += i;
+      if (src.pins[1] in into) into[src.pins[1]] -= i;
+    }
+    for (const src of ex.isources) {
+      if (src.pins[0] in into) into[src.pins[0]] += src.amps;
+      if (src.pins[1] in into) into[src.pins[1]] -= src.amps;
+    }
+    part_currents[c.id] = into;
+    const volts = (name: string) => nodeV(ex.pinNodes.get(name) ?? 0);
+    const power = def.pins.reduce((acc, p) => acc + volts(p.name) * into[p.name], 0);
+    const span = def.pins.length > 1
+      ? Math.max(...def.pins.map((p) => volts(p.name))) - Math.min(...def.pins.map((p) => volts(p.name)))
+      : 0;
+    component_results[c.id] = {
+      current_a: Math.max(0, ...Object.values(into).map(Math.abs)),
+      voltage_v: span,
+      power_w: Math.max(0, power),
+    };
+  }
+
   for (const c of comps) {
-    if (isBoardType(c.type)) continue;
+    if (isBoardType(c.type) || c.type === 'custom') continue;
     const val = defaultValue(c);
     // A device with a lead in mid-air carries nothing, so it drops nothing. Reading
     // the node voltages directly would otherwise invent a current through it.
@@ -495,5 +603,8 @@ export function solveDC(graph: CircuitGraph): Simulation {
     }
   }
 
-  return { status: 'ok', node_voltages, component_results, iterations, pin_currents };
+  return {
+    status: 'ok', node_voltages, component_results, iterations, pin_currents,
+    ...(customs.length ? { part_currents } : {}),
+  };
 }
