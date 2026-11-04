@@ -36,6 +36,10 @@ const DILATE = 2;
 const RAY_FRAC = 0.16;
 /** Fallback isotropic radius, for pins with no meaningful outward direction. */
 const DISC_FRAC = 0.05;
+/** A wire must reach at least this far across the page, as a fraction of it. */
+const MIN_REGION_SPAN_FRAC = 0.05;
+/** A wire fills little of its bounding box. Writing fills a lot of a small one. */
+const MAX_REGION_FILL = 0.3;
 
 export interface Grid {
   data: Uint8Array;
@@ -83,10 +87,18 @@ export interface TraceResult {
 
 // ─────────────────────────────────────────────────────────────── rasterising
 
-export function buildWireGrid(masks: SamMask[], imageW: number, imageH: number): Grid {
+/** The working raster size for a given source image. */
+export function gridSize(imageW: number, imageH: number): { w: number; h: number; scale: number } {
   const scale = Math.min(1, GRID_MAX / Math.max(imageW, imageH));
-  const w = Math.max(1, Math.round(imageW * scale));
-  const h = Math.max(1, Math.round(imageH * scale));
+  return {
+    w: Math.max(1, Math.round(imageW * scale)),
+    h: Math.max(1, Math.round(imageH * scale)),
+    scale,
+  };
+}
+
+export function buildWireGrid(masks: SamMask[], imageW: number, imageH: number): Grid {
+  const { w, h, scale } = gridSize(imageW, imageH);
   const data = new Uint8Array(w * h);
 
   for (const m of masks) {
@@ -160,6 +172,61 @@ function dilate(grid: Grid, radius: number): Grid {
     cur = next;
   }
   return { ...grid, data: cur };
+}
+
+export interface RegionStats {
+  pixels: number;
+  left: number; top: number; right: number; bottom: number;
+}
+
+/**
+ * Which labelled regions could be a wire.
+ *
+ * The ink layer holds everything drawn on the page, and that includes the
+ * handwritten values. A label sits right beside the component it belongs to, so
+ * a lead sweeping outward reaches "470" before it reaches the wire, lands in a
+ * region holding one pin, and is reported as floating — the connection is lost
+ * to a piece of writing.
+ *
+ * Shape tells them apart without reading anything. A wire is a thin line
+ * wandering through a large bounding box, so it fills very little of it. A digit
+ * is dense inside a small one. The same test drops the short dashes of a printed
+ * rule, which are dense for their size too.
+ */
+export function wireLikeRegions(
+  grid: Grid,
+  labels: Int32Array,
+  count: number,
+): Uint8Array {
+  const stats: RegionStats[] = Array.from({ length: count + 1 }, () => ({
+    pixels: 0, left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity,
+  }));
+
+  for (let y = 0; y < grid.h; y++) {
+    for (let x = 0; x < grid.w; x++) {
+      const label = labels[y * grid.w + x];
+      if (!label) continue;
+      const s = stats[label];
+      s.pixels++;
+      if (x < s.left) s.left = x;
+      if (x > s.right) s.right = x;
+      if (y < s.top) s.top = y;
+      if (y > s.bottom) s.bottom = y;
+    }
+  }
+
+  const minSpan = Math.max(8, Math.round(Math.max(grid.w, grid.h) * MIN_REGION_SPAN_FRAC));
+  const ok = new Uint8Array(count + 1);
+  for (let label = 1; label <= count; label++) {
+    const s = stats[label];
+    if (s.pixels === 0) continue;
+    const w = s.right - s.left + 1;
+    const h = s.bottom - s.top + 1;
+    const span = Math.hypot(w, h);
+    const fill = s.pixels / (w * h);
+    ok[label] = span >= minSpan && fill <= MAX_REGION_FILL ? 1 : 0;
+  }
+  return ok;
 }
 
 /** 8-connected labelling. Returns a label per pixel, 0 for background. */
@@ -296,8 +363,19 @@ export function buildTraceGrid(
   imageH: number,
   /** Each component's own segmentation mask, by component id, when available. */
   componentMasks: Map<string, SamMask> = new Map(),
+  /**
+   * Every stroke on the page, at the working raster size. This is the primary
+   * source of wire pixels: a segmentation model can fail to return a wire, but
+   * ink that was drawn is on the page whether anything recognised it or not.
+   */
+  ink?: Uint8Array,
 ): { grid: Grid; wirePixelsRaw: number } {
   const base = buildWireGrid(wireMasks, imageW, imageH);
+  // Union, not replacement. The ink finds wires SAM missed; SAM's masks survive
+  // a stroke too faint to threshold.
+  if (ink && ink.length === base.data.length) {
+    for (let i = 0; i < ink.length; i++) if (ink[i]) base.data[i] = 1;
+  }
   const wirePixelsRaw = base.data.reduce((a, b) => a + b, 0);
 
   /*
@@ -331,9 +409,13 @@ export function traceNets(
   imageW: number,
   imageH: number,
   componentMasks: Map<string, SamMask> = new Map(),
+  ink?: Uint8Array,
 ): TraceResult {
-  const { grid, wirePixelsRaw } = buildTraceGrid(components, wireMasks, imageW, imageH, componentMasks);
+  const { grid, wirePixelsRaw } = buildTraceGrid(components, wireMasks, imageW, imageH, componentMasks, ink);
   const { labels, count } = labelRegions(grid);
+  // Writing and printed rules are labelled too; only wire-shaped regions may
+  // claim a pin.
+  const wireLike = wireLikeRegions(grid, labels, count);
 
   const anchors = components.flatMap(pinAnchors);
   const longEdge = Math.max(grid.w, grid.h);
@@ -342,7 +424,8 @@ export function traceNets(
 
   const labelAt = (gx: number, gy: number): number => {
     if (gx < 0 || gy < 0 || gx >= grid.w || gy >= grid.h) return 0;
-    return labels[gy * grid.w + gx];
+    const label = labels[gy * grid.w + gx];
+    return label && wireLike[label] ? label : 0;
   };
 
   /**
@@ -476,7 +559,7 @@ export function traceNets(
     anchors: [...anchorByRef.values()],
     assignments,
     axisCorrected,
-    regions: count,
+    regions: wireLike.reduce((a: number, b: number) => a + b, 0),
     debug: { gridW: grid.w, gridH: grid.h, wirePixels: wirePixelsRaw },
   };
 }

@@ -35,7 +35,8 @@ import { readComponentCrop, readSketch } from '../meta/spark';
 import {
   DEFAULT_WIRE_CONCEPTS, isPageFurniture, segmentByBoxes, segmentConcepts, type SamMask,
 } from '../meta/sam';
-import { markGround, reconcileNets, traceNets, type TraceResult } from './trace';
+import { gridSize, markGround, reconcileNets, traceNets, type TraceResult } from './trace';
+import { inkRaster, removeRuledLines } from './ink';
 
 /**
  * Below this pin coverage the mask walk has not established enough structure to
@@ -294,7 +295,23 @@ export async function perceive(
   // ── 4. Deterministic connectivity from the wire mask ─────────────────────
   const tTrace = Date.now();
   let trace: TraceResult | null = null;
-  if (wireMasks.length > 0 && components.some((c) => c.bbox)) {
+
+  // The ink layer: every stroke on the page, thresholded locally so uneven
+  // lighting does not wipe out half the drawing. Components are erased from it
+  // inside the trace, and what is left is wire.
+  const { w: gw, h: gh } = gridSize(imageW, imageH);
+  let ink: Uint8Array | undefined;
+  try {
+    ink = await inkRaster(imageBuffer, gw, gh);
+    const ruled = removeRuledLines(ink, gw, gh);
+    timings.ink_pixels = ink.reduce((a: number, b: number) => a + b, 0);
+    timings.ink_ruled_lines_removed = ruled;
+  } catch {
+    // Thresholding failing is survivable: the SAM wire masks still carry the trace.
+    ink = undefined;
+  }
+
+  if ((ink || wireMasks.length > 0) && components.some((c) => c.bbox)) {
     // Pins are placed from the canonical pin list, so fill it in first.
     const withPins = components.map((c) => ({ ...c, pins: pinsFor(c) }));
     const maskById = new Map<string, SamMask>();
@@ -302,7 +319,7 @@ export async function perceive(
       const m = c.mask_id != null ? allMasks.find((x) => x.mask_id === c.mask_id) : undefined;
       if (m) maskById.set(c.id, m);
     }
-    trace = traceNets(withPins, wireMasks, imageW, imageH, maskById);
+    trace = traceNets(withPins, wireMasks, imageW, imageH, maskById, ink);
   }
   mark('trace_ms', tTrace);
 
