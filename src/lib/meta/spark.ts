@@ -44,6 +44,11 @@ async function sparkJson<T>(
 ): Promise<T | null> {
   const body: Json = {
     model: SPARK_MODEL,
+    // Pinned, for what it is worth. Muse Spark still varies run to run at zero —
+    // measured, its bounding boxes move by a few percent — because the sampling
+    // that matters happens in the reasoning trace. It reduces the spread rather
+    // than removing it, and costs nothing.
+    temperature: 0,
     messages: [
       { role: 'developer', content: system },
       { role: 'user', content },
@@ -92,6 +97,13 @@ export interface SparkReading {
   is_circuit: boolean;
 }
 
+/** The only component types the rest of the app can act on. */
+const COMPONENT_TYPES = [
+  'resistor', 'led', 'battery', 'ground', 'junction', 'capacitor',
+  'capacitor_electrolytic', 'switch', 'diode', 'potentiometer', 'transistor',
+  'ic', 'inductor', 'crystal', 'header', 'buzzer', 'motor', 'unknown',
+] as const;
+
 const SKETCH_SCHEMA = {
   name: 'circuit_reading',
   schema: {
@@ -104,7 +116,7 @@ const SKETCH_SCHEMA = {
           type: 'object',
           properties: {
             id: { type: 'string' },
-            type: { type: 'string' },
+            type: { type: 'string', enum: COMPONENT_TYPES },
             value: { type: ['string', 'null'] },
             unit: { type: ['string', 'null'] },
             orientation: { type: ['string', 'null'] },
@@ -201,7 +213,7 @@ const CROP_SCHEMA = {
   schema: {
     type: 'object',
     properties: {
-      type: { type: ['string', 'null'] },
+      type: { type: ['string', 'null'], enum: [...COMPONENT_TYPES, null] },
       value: { type: ['string', 'null'] },
       unit: { type: ['string', 'null'] },
       orientation: { type: ['string', 'null'] },
