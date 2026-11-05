@@ -4,7 +4,9 @@ async function main() {
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
   for (const [name, viewport] of [['narrow', { width: 360, height: 780 }], ['phone', { width: 414, height: 896 }]] as const) {
-    const page = await browser.newPage({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    // Scale 1: the landing page is tall enough that a full-page capture at 2x
+    // exceeds what Chromium will return in one shot.
+    const page = await browser.newPage({ viewport, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
     await page.goto('http://localhost:3111', { waitUntil: 'networkidle' });
     await page.screenshot({ path: `/tmp/sketchit-shots/m-${name}-capture.png`, fullPage: true });
     await page.getByRole('button', { name: /burns out/i }).click();
