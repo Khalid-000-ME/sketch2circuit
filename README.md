@@ -233,6 +233,21 @@ reason plus the rule checks that do not need a solution, rather than an error.
 
 ---
 
+## The landing page
+
+The app opens on a hero rather than straight into the uploader: a
+[Grainient](https://reactbits.dev) field, blurred under a scrim, with the name,
+one line, and the three numbers that matter. The blur is not decoration — the
+field moves, and moving colour behind 15px text destroys its contrast, so it is
+flattened to a wash the type can sit on. It holds still under
+`prefers-reduced-motion`. Below it: what the product actually does, the bundled
+samples, and a footer that says plainly that this is DC only.
+
+Three typefaces, each with a job ([`layout.tsx`](src/app/layout.tsx)):
+**Instrument Serif** for the name and headlines, **Inter** for the interface and
+every explanation, **JetBrains Mono** for anything read character by character —
+pin names, values, netlists. The pitch deck uses the same three.
+
 ## The views
 
 There are two, and the **schematic is the default**.
