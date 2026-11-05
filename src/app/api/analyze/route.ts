@@ -21,16 +21,22 @@ const ACCEPTED = /^image\/(jpeg|jpg|png|webp|heic|heif|avif)$/i;
 
 /**
  * How long a *bundled sample* may spend in live analysis before its cached
- * result is served instead. Set to 0 to always wait for the live run.
+ * result is served instead. 0, the default, always waits for the live run.
  *
  * Only the samples get this. A photo someone uploaded has no cached answer, so
  * there is nothing to fall back to and it waits for the real one.
  *
- * The reason it exists: a healthy run lands in 15-30s, but the Model API's
- * latency has a long tail, and a minute of blank screen in front of someone is
- * worse than a cached answer plus a sentence saying so.
+ * It defaulted to 45s, on the reasoning that a cached answer beats a blank
+ * screen. That was the wrong trade: a healthy run lands in 15-35s, so the race
+ * was close enough that a normal slow moment at the API served a cached result
+ * to someone who had no reason to expect one — and the whole claim of this app
+ * is that it reads *your* page. Waiting is honest; a stand-in is not. A live run
+ * that genuinely fails still falls back, and still says so.
+ *
+ * Set it to a small number to make the samples answer instantly from cache,
+ * which is what the browser tests do so they are not spending a minute a click.
  */
-const SAMPLE_DEADLINE_MS = Number(process.env.SAMPLE_DEADLINE_MS ?? 45_000);
+const SAMPLE_DEADLINE_MS = Number(process.env.SAMPLE_DEADLINE_MS ?? 0);
 
 /**
  * The ceiling on any single analysis, cached fallback or not.
