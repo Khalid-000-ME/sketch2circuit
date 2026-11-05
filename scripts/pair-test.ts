@@ -34,7 +34,9 @@ async function main() {
   await desktop.goto(BASE, { waitUntil: 'networkidle' });
   await desktop.getByRole('button', { name: 'Show QR code' }).click();
   await desktop.waitForSelector('[aria-label^="QR code"] svg', { timeout: 10_000 });
-  const phoneUrl = (await desktop.locator('p.font-mono').first().innerText()).trim();
+  // Matched by what it is, not by where it sits: the landing wordmark is also
+  // monospaced, and came first in the DOM.
+  const phoneUrl = (await desktop.getByText(/^https?:\/\/\S+\/m\/\S+$/).first().innerText()).trim();
   console.log('desktop shows QR for:', phoneUrl);
   await desktop.screenshot({ path: `${OUT}/p1-desktop-qr.png` });
 
